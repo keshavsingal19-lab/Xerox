@@ -111,7 +111,10 @@
       <div id="trackWrap" class="mt-6">
         <div class="flex items-center justify-between mb-2">
           <span id="trackLabel" class="text-sm font-semibold text-slate-700">Reserving token&hellip;</span>
-          <span id="trackPct" class="text-xs font-mono text-slate-400">0%</span>
+          <span class="flex items-center gap-2">
+            <span id="trackTimer" class="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-bold text-blue-700 tabular-nums">0.0s</span>
+            <span id="trackPct" class="text-xs font-mono text-slate-400">0%</span>
+          </span>
         </div>
         <div class="h-2.5 w-full rounded-full bg-slate-200 overflow-hidden">
           <div id="trackBar" class="h-full rounded-full bg-blue-600 relative overflow-hidden" style="width:0%; transition:width .4s ease;">
@@ -190,6 +193,7 @@
   const resultCard  = $("resultCard");
   const tokenBig    = $("tokenBig");
   const trackLabel  = $("trackLabel");
+  const trackTimer  = $("trackTimer");
   const trackPct    = $("trackPct");
   const trackBar    = $("trackBar");
   const trackSteps  = $("trackSteps");
@@ -392,6 +396,24 @@
       icon.textContent = "✖";
     }
   }
+  /* ============================ Real elapsed timer ============================ */
+  let timerStart = 0;
+  let timerHandle = null;
+  function startTimer() {
+    timerStart = Date.now();
+    if (timerHandle) clearInterval(timerHandle);
+    trackTimer.textContent = "0.0s";
+    timerHandle = setInterval(() => {
+      trackTimer.textContent = ((Date.now() - timerStart) / 1000).toFixed(1) + "s";
+    }, 100);
+  }
+  function stopTimer() {
+    if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
+    const secs = ((Date.now() - timerStart) / 1000);
+    trackTimer.textContent = secs.toFixed(1) + "s";
+    return secs;
+  }
+
   function setProgress(pct, label) {
     trackBar.style.width = Math.max(0, Math.min(100, pct)) + "%";
     trackPct.textContent = Math.round(pct) + "%";
@@ -474,6 +496,7 @@
     resultCard.classList.remove("hidden");
     tokenBig.textContent = "#---";
     buildSteps();
+    startTimer();
     setProgress(5, "Reserving token…");
     resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -559,15 +582,17 @@
     }
 
     /* ---- Success ---- */
-    trackLabel.textContent = "Complete";
+    const elapsed = stopTimer();
+    trackLabel.textContent = "Complete in " + elapsed.toFixed(1) + "s";
     successToken.textContent = "#" + tokenId;
-    successCash.textContent = "Pay " + RUPEE + price + " in cash when you collect.";
+    successCash.textContent = "Pay " + RUPEE + price + " in cash when you collect.  ·  Ready in " + elapsed.toFixed(1) + "s";
     successBadge.classList.remove("hidden");
     submitBtn.textContent = "Generate Print Token";
     successBadge.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function failStep(msg) {
+    stopTimer();
     showAlert(stepError, msg);
     submitBtn.disabled = false;
     submitBtn.textContent = "Generate Print Token";
