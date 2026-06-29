@@ -6,23 +6,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
 <div class="min-h-screen bg-slate-900 text-slate-100 font-sans antialiased">
-  <div class="mx-auto max-w-5xl px-6 py-8">
+  <div class="mx-auto max-w-6xl px-6 py-8">
 
     <!-- Header -->
-    <header class="mb-8 flex items-center justify-between border-b border-slate-700 pb-5">
+    <header class="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-slate-700 pb-5">
       <div>
         <h1 class="text-3xl font-black tracking-tight text-white">Campus Xerox</h1>
         <p class="text-sm font-medium text-slate-400">Shopkeeper Switchboard &mdash; clear a token to print</p>
       </div>
-      <div id="connBadge" class="rounded-full bg-slate-700 px-4 py-2 text-xs font-bold uppercase tracking-widest text-slate-300">
-        Ready
+      <div class="flex items-center gap-3">
+        <button id="allOrdersBtn"
+                class="rounded-xl bg-slate-700 px-5 py-2.5 text-sm font-bold uppercase tracking-wide text-white transition hover:bg-slate-600">
+          📋 All Orders
+        </button>
+        <div id="connBadge" class="rounded-full bg-slate-700 px-4 py-2 text-xs font-bold uppercase tracking-widest text-slate-300">
+          Ready
+        </div>
       </div>
     </header>
 
     <div class="grid grid-cols-1 gap-8 lg:grid-cols-[360px_1fr]">
 
       <!-- ============ LEFT: TOKEN PAD ============ -->
-      <section class="rounded-2xl bg-slate-800 p-6 shadow-2xl ring-1 ring-slate-700">
+      <section class="rounded-2xl bg-slate-800 p-6 shadow-2xl ring-1 ring-slate-700 self-start">
         <label class="mb-2 block text-center text-sm font-bold uppercase tracking-widest text-slate-400">
           Enter Token
         </label>
@@ -45,7 +51,7 @@
 
         <p class="mt-4 text-center text-xs leading-relaxed text-slate-500">
           Auto-searches when the 3rd digit is typed.<br />
-          Use your keyboard digits, Enter, or Backspace too.
+          Cleared tokens still open here for reprinting.
         </p>
       </section>
 
@@ -59,7 +65,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
           <p class="text-lg font-semibold">Awaiting a token</p>
-          <p class="text-sm">Type a 3-digit token on the pad to pull up the order.</p>
+          <p class="text-sm">Type a 3-digit token, or open <span class="font-semibold text-slate-300">All Orders</span>.</p>
         </div>
 
         <!-- LOADING state -->
@@ -69,7 +75,7 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
           </svg>
-          <p class="text-lg font-semibold text-slate-300">Fetching order&hellip;</p>
+          <p class="text-lg font-semibold text-slate-300">Working&hellip;</p>
         </div>
 
         <!-- ERROR state -->
@@ -82,7 +88,38 @@
           <p class="mt-2 text-sm text-red-300/70">Check the number and try again.</p>
         </div>
 
-        <!-- SUCCESS / CLEARANCE CARD -->
+        <!-- ============ ALL ORDERS LIST state ============ -->
+        <div id="listState" class="hidden rounded-2xl bg-slate-800 ring-1 ring-slate-700">
+          <div class="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+            <div>
+              <p class="text-lg font-black text-white">All Orders</p>
+              <p id="listMeta" class="text-xs font-medium text-slate-400">&mdash;</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="listRefreshBtn" class="rounded-lg bg-slate-700 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white hover:bg-slate-600">⟳ Refresh</button>
+              <button id="listCloseBtn" class="rounded-lg bg-slate-700 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white hover:bg-slate-600">✕ Close</button>
+            </div>
+          </div>
+          <div class="max-h-[34rem] overflow-auto">
+            <table class="w-full text-left text-sm">
+              <thead class="sticky top-0 bg-slate-900 text-xs uppercase tracking-wider text-slate-400">
+                <tr>
+                  <th class="px-4 py-3 font-bold">Token</th>
+                  <th class="px-4 py-3 font-bold">Student</th>
+                  <th class="px-4 py-3 font-bold">File</th>
+                  <th class="px-4 py-3 font-bold">Specs</th>
+                  <th class="px-4 py-3 text-right font-bold">Price</th>
+                  <th class="px-4 py-3 font-bold">Status</th>
+                  <th class="px-4 py-3 font-bold">Time</th>
+                </tr>
+              </thead>
+              <tbody id="listBody" class="divide-y divide-slate-700/60"></tbody>
+            </table>
+          </div>
+          <div id="listEmpty" class="hidden px-5 py-12 text-center text-slate-400">No orders in the queue right now.</div>
+        </div>
+
+        <!-- ============ SUCCESS / CLEARANCE CARD ============ -->
         <div id="orderCard"
              class="hidden overflow-hidden rounded-2xl bg-white text-slate-900 shadow-2xl ring-1 ring-slate-300">
 
@@ -95,13 +132,12 @@
             <div class="text-right">
               <p class="text-xs font-bold uppercase tracking-widest text-slate-400">Student ID</p>
               <p id="cardStudent" class="text-xl font-bold text-white">&mdash;</p>
+              <p id="cardTime" class="text-xs font-medium text-slate-400">&mdash;</p>
             </div>
           </div>
 
-          <!-- Already-printed warning ribbon (hidden unless re-cleared) -->
-          <div id="printedRibbon" class="hidden bg-amber-400 px-6 py-2 text-center text-sm font-black uppercase tracking-widest text-amber-950">
-            Already cleared &mdash; archived
-          </div>
+          <!-- Status ribbon -->
+          <div id="statusRibbon" class="px-6 py-2 text-center text-sm font-black uppercase tracking-widest"></div>
 
           <div class="px-6 py-5">
 
@@ -137,13 +173,28 @@
               </div>
             </div>
 
-            <!-- TOTAL banner -->
-            <div class="mb-6 rounded-xl bg-emerald-600 px-6 py-5 text-center text-white shadow-lg">
-              <p class="text-sm font-bold uppercase tracking-[0.3em] text-emerald-100">Total Amount Due</p>
-              <p id="cardTotal" class="font-mono text-6xl font-black leading-none">&mdash;</p>
+            <!-- TOTAL banner + price editor -->
+            <div class="mb-6 rounded-xl bg-emerald-600 px-6 py-5 text-white shadow-lg">
+              <div class="flex items-center justify-between">
+                <p class="text-sm font-bold uppercase tracking-[0.3em] text-emerald-100">Total Amount Due</p>
+                <button id="editPriceBtn"
+                        class="rounded-lg bg-emerald-700/70 px-3 py-1 text-xs font-bold uppercase tracking-wide text-white hover:bg-emerald-800">
+                  ✎ Edit
+                </button>
+              </div>
+              <p id="cardTotal" class="text-center font-mono text-6xl font-black leading-none">&mdash;</p>
+
+              <!-- inline editor (hidden by default) -->
+              <div id="priceEditor" class="mt-4 hidden items-center justify-center gap-2">
+                <span class="text-2xl font-black">&#8377;</span>
+                <input id="priceInput" type="number" min="0" step="1" inputmode="numeric"
+                       class="w-40 rounded-lg border-0 px-3 py-2 text-center text-2xl font-black text-slate-900 focus:outline-none focus:ring-4 focus:ring-emerald-300" />
+                <button id="savePriceBtn" class="rounded-lg bg-white px-4 py-2 text-sm font-black uppercase text-emerald-700 hover:bg-emerald-50">Save</button>
+                <button id="cancelPriceBtn" class="rounded-lg bg-emerald-700/70 px-4 py-2 text-sm font-bold uppercase text-white hover:bg-emerald-800">Cancel</button>
+              </div>
             </div>
 
-            <!-- Unlock & print -->
+            <!-- Action button -->
             <button id="unlockBtn"
                     class="w-full rounded-xl bg-green-600 py-5 text-2xl font-black uppercase tracking-widest text-white shadow-lg transition hover:bg-green-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-slate-400">
               Unlock &amp; Print
@@ -178,15 +229,18 @@
   var numpad      = document.getElementById("numpad");
   var lookupBtn   = document.getElementById("lookupBtn");
   var connBadge   = document.getElementById("connBadge");
+  var allOrdersBtn = document.getElementById("allOrdersBtn");
 
   var idleState    = document.getElementById("idleState");
   var loadingState = document.getElementById("loadingState");
   var errorState   = document.getElementById("errorState");
   var orderCard    = document.getElementById("orderCard");
+  var listState    = document.getElementById("listState");
   var errorMsg     = document.getElementById("errorMsg");
 
   var cardToken    = document.getElementById("cardToken");
   var cardStudent  = document.getElementById("cardStudent");
+  var cardTime     = document.getElementById("cardTime");
   var cardFileName = document.getElementById("cardFileName");
   var cardFileMeta = document.getElementById("cardFileMeta");
   var cardFileList = document.getElementById("cardFileList");
@@ -197,7 +251,19 @@
   var cardTotal    = document.getElementById("cardTotal");
   var unlockBtn    = document.getElementById("unlockBtn");
   var unlockHint   = document.getElementById("unlockHint");
-  var printedRibbon = document.getElementById("printedRibbon");
+  var statusRibbon = document.getElementById("statusRibbon");
+
+  var editPriceBtn   = document.getElementById("editPriceBtn");
+  var priceEditor    = document.getElementById("priceEditor");
+  var priceInput     = document.getElementById("priceInput");
+  var savePriceBtn   = document.getElementById("savePriceBtn");
+  var cancelPriceBtn = document.getElementById("cancelPriceBtn");
+
+  var listBody      = document.getElementById("listBody");
+  var listMeta      = document.getElementById("listMeta");
+  var listEmpty     = document.getElementById("listEmpty");
+  var listRefreshBtn = document.getElementById("listRefreshBtn");
+  var listCloseBtn  = document.getElementById("listCloseBtn");
 
   // ===== Helpers =====
   function setBadge(text, classes) {
@@ -215,6 +281,11 @@
     return rounded + " " + units[i];
   }
 
+  function money(v) {
+    var n = Number(v);
+    return RUPEE + " " + (isFinite(n) ? n : 0);
+  }
+
   function escapeHtml(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;")
@@ -224,16 +295,33 @@
       .replace(/'/g, "&#39;");
   }
 
+  function parseSpecs(order) {
+    var specs = order.print_specifications || {};
+    if (typeof specs === "string") {
+      try { specs = JSON.parse(specs); } catch (e) { specs = {}; }
+    }
+    return specs || {};
+  }
+
+  // status from a row: "pending" (reserved, not uploaded), "ready", or "cleared"
+  function statusOf(order) {
+    if (Number(order.is_printed) === 1) return "cleared";
+    if (order.drive_viewer_url === "PENDING") return "pending";
+    return "ready";
+  }
+
   function show(which) {
     idleState.classList.add("hidden");    idleState.classList.remove("flex");
     loadingState.classList.add("hidden"); loadingState.classList.remove("flex");
     errorState.classList.add("hidden");   errorState.classList.remove("flex");
     orderCard.classList.add("hidden");
+    listState.classList.add("hidden");
 
     if (which === "idle")    { idleState.classList.remove("hidden");    idleState.classList.add("flex"); }
     if (which === "loading") { loadingState.classList.remove("hidden"); loadingState.classList.add("flex"); }
     if (which === "error")   { errorState.classList.remove("hidden");   errorState.classList.add("flex"); }
     if (which === "order")   { orderCard.classList.remove("hidden"); }
+    if (which === "list")    { listState.classList.remove("hidden"); }
   }
 
   function updateTokenDisplay() {
@@ -262,7 +350,6 @@
   function pressDigit(d) {
     if (busy) return;
     if (currentDigits.length >= 3) {
-      // start a fresh token on the next digit after 3 are present
       currentDigits = "";
     }
     currentDigits += d;
@@ -287,7 +374,6 @@
   }
 
   function buildPad() {
-    // Rows: 1 2 3 / 4 5 6 / 7 8 9 / CLEAR 0 BACK
     ["1","2","3","4","5","6","7","8","9"].forEach(function (d) {
       numpad.appendChild(makeBtn(d, { onClick: function () { pressDigit(d); } }));
     });
@@ -302,32 +388,33 @@
     }));
   }
 
-  // ===== API: GET /api/orders =====
+  // ===== Lookup (numpad) -> loadToken =====
   function lookup() {
     if (currentDigits.length !== 3) return;
-    var token = currentDigits;
-    var tokenNum = parseInt(token, 10);
+    var tokenNum = parseInt(currentDigits, 10);
     if (!(tokenNum >= 100 && tokenNum <= 999)) {
-      // Out-of-range (e.g. a leading zero like "012"): never hits the server.
       currentOrder = null;
       errorMsg.textContent = "Token must be a number between 100 and 999.";
       show("error");
       setBadge("Invalid", "bg-red-600 text-white");
       return;
     }
+    loadToken(currentDigits);
+  }
+
+  // Fetch one token (INCLUDING cleared ones via all=1) and render the card.
+  function loadToken(token) {
     busy = true;
     updateTokenDisplay();
     setBadge("Searching", "bg-sky-600 text-white");
     show("loading");
 
-    fetch("/api/orders?token_id=" + encodeURIComponent(token), {
+    fetch("/api/orders?all=1&token_id=" + encodeURIComponent(token), {
       method: "GET",
       headers: { "Accept": "application/json" }
     })
     .then(function (res) {
-      return res.json().then(function (data) {
-        return { status: res.status, data: data };
-      });
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
     })
     .then(function (r) {
       busy = false;
@@ -335,7 +422,8 @@
       if (r.data && r.data.success && r.data.order) {
         currentOrder = r.data.order;
         renderOrder(r.data.order);
-        setBadge("Found", "bg-emerald-600 text-white");
+        var st = statusOf(r.data.order);
+        setBadge(st === "cleared" ? "Cleared" : "Found", st === "cleared" ? "bg-amber-500 text-amber-950" : "bg-emerald-600 text-white");
       } else {
         currentOrder = null;
         var msg = (r.data && r.data.error) ? r.data.error : ("Lookup failed (" + r.status + ")");
@@ -356,17 +444,14 @@
 
   // ===== Render the clearance card =====
   function renderOrder(order) {
-    var specs = order.print_specifications || {};
-    // print_specifications may arrive as a parsed object per contract; defensively parse if string.
-    if (typeof specs === "string") {
-      try { specs = JSON.parse(specs); } catch (e) { specs = {}; }
-    }
-
+    var specs = parseSpecs(order);
     var files = Array.isArray(specs.files) ? specs.files : [];
     var fileCount = (typeof specs.fileCount === "number") ? specs.fileCount : files.length;
+    var status = statusOf(order);
 
     cardToken.textContent = order.token_id;
     cardStudent.textContent = order.student_id || "(none)";
+    cardTime.textContent = order.created_at ? ("placed " + order.created_at) : "";
 
     // File name + meta
     var primaryName = specs.fileName ||
@@ -405,53 +490,67 @@
     specCopies.textContent = (typeof specs.copies === "number") ? specs.copies : (specs.copies || "—");
 
     // Total
-    var price = Number(order.calculated_price);
-    cardTotal.textContent = RUPEE + " " + (isFinite(price) ? price : 0);
+    cardTotal.textContent = money(order.calculated_price);
 
-    // Reset button state for a fresh fetch
-    if (Number(order.is_printed) === 1) {
-      // Defensive: backend normally 404s on printed tokens, but guard anyway.
-      printedRibbon.classList.remove("hidden");
-      setCleared();
+    // Reset price editor
+    hidePriceEditor();
+
+    // Status ribbon + action button
+    if (status === "cleared") {
+      statusRibbon.className = "bg-amber-400 px-6 py-2 text-center text-sm font-black uppercase tracking-widest text-amber-950";
+      statusRibbon.textContent = "Already cleared — archived";
+      unlockBtn.disabled = false;
+      unlockBtn.textContent = "Re-open Files & Print";
+      unlockBtn.className = "w-full rounded-xl bg-slate-700 py-5 text-2xl font-black uppercase tracking-widest text-white shadow-lg transition hover:bg-slate-600 active:scale-[0.99]";
+      unlockHint.textContent = "This token is already cleared. Opens the file(s) again for reprinting.";
+      unlockHint.className = "mt-3 text-center text-xs font-medium text-slate-500";
     } else {
-      printedRibbon.classList.add("hidden");
+      statusRibbon.className = "bg-emerald-500 px-6 py-2 text-center text-sm font-black uppercase tracking-widest text-emerald-950";
+      statusRibbon.textContent = "Active — ready to print";
       unlockBtn.disabled = false;
       unlockBtn.textContent = "Unlock & Print";
       unlockBtn.className = "w-full rounded-xl bg-green-600 py-5 text-2xl font-black uppercase tracking-widest text-white shadow-lg transition hover:bg-green-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-slate-400";
-      unlockHint.textContent = "Opens every file in a new tab — then just Ctrl+P each one.";
+      unlockHint.textContent = "Marks the job done, then opens every file in a new tab — Ctrl+P each one.";
       unlockHint.className = "mt-3 text-center text-xs font-medium text-slate-500";
     }
 
     show("order");
   }
 
-  function setCleared() {
-    unlockBtn.disabled = true;
-    unlockBtn.textContent = "Cleared ✓";
-    unlockBtn.className = "w-full rounded-xl bg-slate-400 py-5 text-2xl font-black uppercase tracking-widest text-white shadow-lg";
-    printedRibbon.classList.remove("hidden");
-    printedRibbon.textContent = "Cleared — archived";
+  function markClearedUI() {
+    if (currentOrder) currentOrder.is_printed = 1;
+    statusRibbon.className = "bg-amber-400 px-6 py-2 text-center text-sm font-black uppercase tracking-widest text-amber-950";
+    statusRibbon.textContent = "Cleared — archived";
+    unlockBtn.disabled = false;
+    unlockBtn.textContent = "Re-open Files & Print";
+    unlockBtn.className = "w-full rounded-xl bg-slate-700 py-5 text-2xl font-black uppercase tracking-widest text-white shadow-lg transition hover:bg-slate-600 active:scale-[0.99]";
   }
 
   // ===== Open files for printing =====
   function openFilesForPrint(order) {
-    var specs = order.print_specifications || {};
-    if (typeof specs === "string") {
-      try { specs = JSON.parse(specs); } catch (e) { specs = {}; }
-    }
+    var specs = parseSpecs(order);
     var files = Array.isArray(specs.files) ? specs.files : [];
     var urls = [];
     files.forEach(function (f) { if (f && f.url) urls.push(f.url); });
-    if (urls.length === 0 && order.drive_viewer_url) urls.push(order.drive_viewer_url);
-
-    urls.forEach(function (u) {
-      window.open(u, "_blank", "noopener");
-    });
+    if (urls.length === 0 && order.drive_viewer_url && order.drive_viewer_url !== "PENDING") urls.push(order.drive_viewer_url);
+    urls.forEach(function (u) { window.open(u, "_blank", "noopener"); });
+    return urls.length;
   }
 
-  // ===== API: PATCH /api/orders (Unlock & Print) =====
-  function unlockAndPrint() {
+  // ===== Action button: clear-and-print OR re-open =====
+  function onUnlockClick() {
     if (!currentOrder || busy) return;
+    if (Number(currentOrder.is_printed) === 1) {
+      // Already cleared — just reopen the files, no DB change.
+      var opened = openFilesForPrint(currentOrder);
+      unlockHint.textContent = opened ? "Re-opened for printing." : "No file link found for this order.";
+      unlockHint.className = "mt-3 text-center text-xs font-semibold text-green-700";
+      return;
+    }
+    unlockAndPrint();
+  }
+
+  function unlockAndPrint() {
     var order = currentOrder;
     var token = order.token_id;
 
@@ -471,11 +570,9 @@
     .then(function (r) {
       busy = false;
       if (r.data && r.data.success) {
-        // Open the files first so the popup is tied to the user click context window,
-        // then lock down the card.
         openFilesForPrint(order);
-        setCleared();
-        unlockHint.textContent = "Sent to print. If a tab was blocked, allow pop-ups and re-open from the order.";
+        markClearedUI();
+        unlockHint.textContent = "Sent to print. If a tab was blocked, allow pop-ups and re-open.";
         unlockHint.className = "mt-3 text-center text-xs font-semibold text-green-700";
         setBadge("Cleared", "bg-emerald-600 text-white");
       } else {
@@ -497,16 +594,160 @@
     });
   }
 
+  // ===== Price editor =====
+  function showPriceEditor() {
+    if (!currentOrder) return;
+    priceInput.value = Number(currentOrder.calculated_price) || 0;
+    priceEditor.classList.remove("hidden");
+    priceEditor.classList.add("flex");
+    priceInput.focus();
+    priceInput.select();
+  }
+  function hidePriceEditor() {
+    priceEditor.classList.add("hidden");
+    priceEditor.classList.remove("flex");
+  }
+
+  function savePrice() {
+    if (!currentOrder || busy) return;
+    var newPrice = Number(priceInput.value);
+    if (!isFinite(newPrice) || newPrice < 0) {
+      unlockHint.textContent = "Enter a valid non-negative price.";
+      unlockHint.className = "mt-3 text-center text-xs font-bold text-red-600";
+      return;
+    }
+    var token = currentOrder.token_id;
+    busy = true;
+    savePriceBtn.textContent = "Saving…";
+
+    fetch("/api/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ token_id: token, calculated_price: newPrice })
+    })
+    .then(function (res) {
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
+    })
+    .then(function (r) {
+      busy = false;
+      savePriceBtn.textContent = "Save";
+      if (r.data && r.data.success) {
+        currentOrder.calculated_price = newPrice;
+        cardTotal.textContent = money(newPrice);
+        hidePriceEditor();
+        setBadge("Price updated", "bg-emerald-600 text-white");
+      } else {
+        unlockHint.textContent = (r.data && r.data.error) ? r.data.error : "Could not update price.";
+        unlockHint.className = "mt-3 text-center text-xs font-bold text-red-600";
+      }
+    })
+    .catch(function (err) {
+      busy = false;
+      savePriceBtn.textContent = "Save";
+      unlockHint.textContent = "Network error: " + (err && err.message ? err.message : "could not save");
+      unlockHint.className = "mt-3 text-center text-xs font-bold text-red-600";
+    });
+  }
+
+  // ===== All Orders list =====
+  function statusBadgeHtml(status) {
+    if (status === "cleared") return '<span class="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-900">Cleared</span>';
+    if (status === "pending") return '<span class="rounded-full bg-slate-600 px-2 py-0.5 text-xs font-bold text-slate-200">Reserving</span>';
+    return '<span class="rounded-full bg-emerald-500 px-2 py-0.5 text-xs font-bold text-emerald-950">Ready</span>';
+  }
+
+  function timeShort(ts) {
+    if (!ts) return "—";
+    // ts is "YYYY-MM-DD HH:MM:SS" local — show "MM-DD HH:MM"
+    var m = String(ts).match(/^\d{4}-(\d{2}-\d{2}) (\d{2}:\d{2})/);
+    return m ? (m[1] + " " + m[2]) : ts;
+  }
+
+  function loadList() {
+    busy = true;
+    setBadge("Loading list", "bg-sky-600 text-white");
+    show("list");
+    listBody.innerHTML = "";
+    listEmpty.classList.add("hidden");
+    listMeta.textContent = "Loading…";
+
+    fetch("/api/orders?list=1", { method: "GET", headers: { "Accept": "application/json" } })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      busy = false;
+      if (!data || !data.success || !Array.isArray(data.orders)) {
+        listMeta.textContent = "Could not load orders.";
+        setBadge("Error", "bg-red-600 text-white");
+        return;
+      }
+      var orders = data.orders;
+      var ready = 0, cleared = 0, pending = 0;
+      listBody.innerHTML = "";
+      orders.forEach(function (o) {
+        var specs = parseSpecs(o);
+        var status = statusOf(o);
+        if (status === "ready") ready++; else if (status === "cleared") cleared++; else pending++;
+        var fileName = specs.fileName || "—";
+        var pages = (specs.pages != null ? specs.pages : "—");
+        var copies = (specs.copies != null ? specs.copies : "—");
+        var specsTxt = (specs.color || "—") + " · " + (specs.layout || "—") + " · " + pages + "p × " + copies;
+
+        var tr = document.createElement("tr");
+        tr.className = "cursor-pointer text-slate-200 hover:bg-slate-700/50";
+        tr.innerHTML =
+          '<td class="px-4 py-3 font-mono text-lg font-black text-emerald-400">' + o.token_id + '</td>' +
+          '<td class="px-4 py-3 font-semibold">' + escapeHtml(o.student_id || "—") + '</td>' +
+          '<td class="px-4 py-3 max-w-[16rem] truncate" title="' + escapeHtml(fileName) + '">' + escapeHtml(fileName) + '</td>' +
+          '<td class="px-4 py-3 text-xs text-slate-400">' + escapeHtml(specsTxt) + '</td>' +
+          '<td class="px-4 py-3 text-right font-mono font-bold">' + money(o.calculated_price) + '</td>' +
+          '<td class="px-4 py-3">' + statusBadgeHtml(status) + '</td>' +
+          '<td class="px-4 py-3 font-mono text-xs text-slate-400">' + escapeHtml(timeShort(o.created_at)) + '</td>';
+        tr.addEventListener("click", function () {
+          currentDigits = String(o.token_id);
+          updateTokenDisplay();
+          loadToken(String(o.token_id));
+        });
+        listBody.appendChild(tr);
+      });
+
+      if (orders.length === 0) {
+        listEmpty.classList.remove("hidden");
+        listMeta.textContent = "0 orders";
+      } else {
+        listMeta.textContent = orders.length + " total  ·  " + ready + " ready  ·  " + cleared + " cleared  ·  " + pending + " reserving";
+      }
+      setBadge("All Orders", "bg-slate-600 text-white");
+    })
+    .catch(function (err) {
+      busy = false;
+      listMeta.textContent = "Network error: " + (err && err.message ? err.message : "could not reach server");
+      setBadge("Offline", "bg-red-600 text-white");
+    });
+  }
+
   // ===== Wire up =====
   buildPad();
   updateTokenDisplay();
   show("idle");
 
   lookupBtn.addEventListener("click", lookup);
-  unlockBtn.addEventListener("click", unlockAndPrint);
+  unlockBtn.addEventListener("click", onUnlockClick);
+  allOrdersBtn.addEventListener("click", loadList);
+  listRefreshBtn.addEventListener("click", loadList);
+  listCloseBtn.addEventListener("click", function () { pressClear(); });
 
-  // Physical keyboard support
+  editPriceBtn.addEventListener("click", showPriceEditor);
+  cancelPriceBtn.addEventListener("click", hidePriceEditor);
+  savePriceBtn.addEventListener("click", savePrice);
+  priceInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); savePrice(); }
+    if (e.key === "Escape") { e.preventDefault(); hidePriceEditor(); }
+    e.stopPropagation(); // don't let digits drive the numpad while editing price
+  });
+
+  // Physical keyboard support (ignored while typing in the price field)
   document.addEventListener("keydown", function (e) {
+    if (document.activeElement === priceInput) return;
     if (e.key >= "0" && e.key <= "9") {
       pressDigit(e.key);
       e.preventDefault();
@@ -516,7 +757,7 @@
     } else if (e.key === "Enter") {
       if (currentDigits.length === 3) lookup();
       e.preventDefault();
-    } else if (e.key === "Escape" || (e.key && e.key.toLowerCase() === "c" && !e.ctrlKey && !e.metaKey)) {
+    } else if (e.key === "Escape") {
       pressClear();
     }
   });

@@ -420,7 +420,23 @@
     if (label) trackLabel.textContent = label;
   }
 
-  /* ============================ Upload one file to GAS ============================ */
+  // Gentle "creep" so the bar keeps visibly moving while we wait on Drive
+  // (the server->Drive leg emits no byte events). Eases toward `to`, never reaching it.
+  let creepHandle = null;
+  function startCreep(from, to) {
+    stopCreep();
+    let cur = from;
+    setProgress(cur);
+    creepHandle = setInterval(() => {
+      cur += (to - cur) * 0.08;
+      setProgress(Math.min(cur, to - 0.4));
+    }, 350);
+  }
+  function stopCreep() {
+    if (creepHandle) { clearInterval(creepHandle); creepHandle = null; }
+  }
+
+  /* ============================ Upload one file (real byte progress) ============================ */
   function readBase64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -435,7 +451,32 @@
     });
   }
 
-  async function uploadToGAS(file, tokenNumber) {
+  // XHR (not fetch) so we get real upload byte-progress events.
+  function postToProxy(payload, onUploadProgress, onSent) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/upload");
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onUploadProgress) onUploadProgress(e.loaded, e.total);
+      };
+      xhr.upload.onload = () => { if (onSent) onSent(); };
+      xhr.onload = () => {
+        let data;
+        try { data = JSON.parse(xhr.responseText); }
+        catch (e) { return reject(new Error("Upload returned an unreadable response.")); }
+        if (!data || data.success !== true || !data.webViewLink) {
+          return reject(new Error(data && data.error ? data.error : "Drive upload failed."));
+        }
+        resolve(data);
+      };
+      xhr.onerror = () => reject(new Error("Network error during upload."));
+      xhr.ontimeout = () => reject(new Error("Upload timed out."));
+      xhr.send(JSON.stringify(payload));
+    });
+  }
+
+  async function uploadToGAS(file, tokenNumber, onUploadProgress, onSent) {
     const fileBase64 = await readBase64(file);
     const payload = {
       fileName: file.name,
@@ -444,18 +485,7 @@
       isCatalogItem: false,
       mimeType: file.type || ""
     };
-    // Same-origin proxy: /api/upload forwards to Apps Script server-side (no CORS).
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    let data;
-    try { data = await res.json(); }
-    catch (e) { throw new Error("Drive upload returned an unreadable response for " + file.name); }
-    if (!data || data.success !== true || !data.webViewLink) {
-      throw new Error((data && data.error) ? data.error : "Drive upload failed for " + file.name);
-    }
+    const data = await postToProxy(payload, onUploadProgress, onSent);
     return { name: file.name, sizeBytes: file.size, url: data.webViewLink };
   }
 
@@ -512,7 +542,7 @@
       tokenId = data.token_id;
       tokenBig.textContent = "#" + tokenId;
       setStep("reserve", "done");
-      setProgress(20, "Token #" + tokenId + " reserved");
+      setProgress(15, "Token #" + tokenId + " reserved");
     } catch (e) {
       setStep("reserve", "error");
       failStep("Could not reserve a token. " + e.message);
@@ -523,16 +553,27 @@
     let uploaded = [];
     try {
       setStep("upload", "active");
-      for (let i = 0; i < selectedFiles.length; i++) {
+      const n = selectedFiles.length;
+      for (let i = 0; i < n; i++) {
         const f = selectedFiles[i];
-        setProgress(20 + (60 * i) / selectedFiles.length,
-          "Uploading " + (i + 1) + " of " + selectedFiles.length + ": " + f.name);
-        const info = await uploadToGAS(f, tokenId);
+        const base = 15 + (70 * i) / n;   // this file's slice of the 15%..85% band
+        const span = 70 / n;
+        trackLabel.textContent = "Uploading " + (i + 1) + " of " + n + ": " + f.name;
+        const info = await uploadToGAS(
+          f, tokenId,
+          // real network send -> first 60% of this file's slice
+          (loaded, total) => { stopCreep(); setProgress(base + span * 0.6 * (loaded / total)); },
+          // bytes sent, now waiting on Drive -> creep through the rest of the slice
+          () => { trackLabel.textContent = "Saving to Drive: " + f.name + "…"; startCreep(base + span * 0.6, base + span); }
+        );
+        stopCreep();
+        setProgress(base + span);
         uploaded.push(info);
       }
       setStep("upload", "done");
-      setProgress(80, "All files uploaded");
+      setProgress(85, "All files uploaded");
     } catch (e) {
+      stopCreep();
       setStep("upload", "error");
       failStep("File upload failed. " + e.message);
       return;
@@ -593,6 +634,7 @@
 
   function failStep(msg) {
     stopTimer();
+    stopCreep();
     showAlert(stepError, msg);
     submitBtn.disabled = false;
     submitBtn.textContent = "Generate Print Token";
