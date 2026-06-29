@@ -5,4 +5,4 @@ pages_build_output_dir = "."
 [[d1_databases]]
 binding = "DB"
 database_name = "xerox_db"
-database_id = "PASTE_D1_DATABASE_ID"
+database_id = "9ea02e1f-b779-41e6-9d8c-459fdfd31ada"
