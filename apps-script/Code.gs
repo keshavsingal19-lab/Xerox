@@ -101,10 +101,20 @@ function doPost(e) {
     var decodedBytes = Utilities.base64Decode(payload.fileBase64);
     var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
 
-    var pendingFolder = DriveApp.getFolderById(DAILY_PENDING_FOLDER_ID);
-    var file = pendingFolder.createFile(blob);
+    // target: 'catalog' stores a permanent, reusable copy in the Master Catalog
+    // (used by the auto-promotion / dedup flow). Anything else -> Daily Pending.
+    var target = (payload.target === 'catalog') ? 'catalog' : 'pending';
+    var folderId = (target === 'catalog') ? MASTER_CATALOG_FOLDER_ID : DAILY_PENDING_FOLDER_ID;
+    var folder = DriveApp.getFolderById(folderId);
+    var file = folder.createFile(blob);
 
-    var newName = 'XEROX_TOKEN_' + tokenNumber + '_' + fileName;
+    var newName;
+    if (target === 'catalog') {
+      var shortHash = payload.fileHash ? String(payload.fileHash).substring(0, 10) : 'shared';
+      newName = 'CATALOG_' + shortHash + '_' + fileName;
+    } else {
+      newName = 'XEROX_TOKEN_' + tokenNumber + '_' + fileName;
+    }
     file.setName(newName);
 
     // Make it openable by the shopkeeper via the link.
@@ -114,7 +124,8 @@ function doPost(e) {
       success: true,
       webViewLink: file.getUrl(),
       fileId: file.getId(),
-      fileName: newName
+      fileName: newName,
+      target: target
     });
   } catch (err) {
     return jsonOutput({ success: false, error: String(err) });

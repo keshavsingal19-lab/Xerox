@@ -476,17 +476,52 @@
     });
   }
 
+  // SHA-256 of the file content (hex). Enables server-side de-duplication.
+  // Requires a secure context (HTTPS / localhost) — null-safe if unavailable.
+  async function sha256Hex(file) {
+    if (!(window.crypto && crypto.subtle)) return null;
+    const buf = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", buf);
+    const bytes = new Uint8Array(digest);
+    let hex = "";
+    for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
+    return hex;
+  }
+
   async function uploadToGAS(file, tokenNumber, onUploadProgress, onSent) {
+    // 1. Content hash (non-fatal if the browser can't compute it).
+    let fileHash = null;
+    try { fileHash = await sha256Hex(file); } catch (e) { fileHash = null; }
+
+    // 2. Cheap check: if this exact content was already promoted to the catalog,
+    //    skip the upload entirely and reuse the permanent link.
+    if (fileHash) {
+      try {
+        const chkRes = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ check: true, fileHash: fileHash })
+        });
+        const chk = await chkRes.json();
+        if (chk && chk.success && chk.promoted && chk.webViewLink) {
+          if (onUploadProgress) onUploadProgress(1, 1); // fill this file's slice instantly
+          return { name: file.name, sizeBytes: file.size, url: chk.webViewLink, fromCatalog: true };
+        }
+      } catch (e) { /* fall through to a normal upload */ }
+    }
+
+    // 3. Normal upload (with the hash so the backend can count / auto-promote).
     const fileBase64 = await readBase64(file);
     const payload = {
       fileName: file.name,
       tokenNumber: tokenNumber,
       fileBase64: fileBase64,
       isCatalogItem: false,
-      mimeType: file.type || ""
+      mimeType: file.type || "",
+      fileHash: fileHash || ""
     };
     const data = await postToProxy(payload, onUploadProgress, onSent);
-    return { name: file.name, sizeBytes: file.size, url: data.webViewLink };
+    return { name: file.name, sizeBytes: file.size, url: data.webViewLink, fromCatalog: !!data.fromCatalog };
   }
 
   /* ============================ Submit flow ============================ */
@@ -624,9 +659,11 @@
 
     /* ---- Success ---- */
     const elapsed = stopTimer();
+    const cachedCount = uploaded.filter((u) => u.fromCatalog).length;
     trackLabel.textContent = "Complete in " + elapsed.toFixed(1) + "s";
     successToken.textContent = "#" + tokenId;
-    successCash.textContent = "Pay " + RUPEE + price + " in cash when you collect.  ·  Ready in " + elapsed.toFixed(1) + "s";
+    successCash.textContent = "Pay " + RUPEE + price + " in cash when you collect.  ·  Ready in " + elapsed.toFixed(1) + "s" +
+      (cachedCount > 0 ? "  ·  ⚡ " + cachedCount + " file" + (cachedCount > 1 ? "s" : "") + " served instantly from catalog" : "");
     successBadge.classList.remove("hidden");
     submitBtn.textContent = "Generate Print Token";
     successBadge.scrollIntoView({ behavior: "smooth", block: "center" });
