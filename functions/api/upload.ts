@@ -110,19 +110,23 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return json({ success: true, webViewLink: data.webViewLink, fileId: data.fileId, fileName: data.fileName, promoted: false, fromCatalog: false });
     }
 
-    // Atomically bump the counter and read the current state in ONE round-trip
-    // (removes the read-then-write race on hit_count).
-    const state = await db
+    // Atomically bump the counter (single statement), then read the row.
+    // Two statements instead of RETURNING for maximum D1 compatibility.
+    await db
       .prepare(
         `INSERT INTO catalog (file_hash, file_name, hit_count, updated_at)
          VALUES (?, ?, 1, ${NOW_LOCAL})
          ON CONFLICT(file_hash) DO UPDATE SET
            hit_count = hit_count + 1,
            file_name = excluded.file_name,
-           updated_at = excluded.updated_at
-         RETURNING hit_count, promoted, catalog_url, catalog_file_id`
+           updated_at = excluded.updated_at`
       )
       .bind(fileHash, payload.fileName || "")
+      .run();
+
+    const state = await db
+      .prepare("SELECT hit_count, promoted, catalog_url, catalog_file_id FROM catalog WHERE file_hash = ?")
+      .bind(fileHash)
       .first<CatalogRow>();
 
     // Already promoted -> serve the permanent copy instantly, no upload at all.

@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Campus Xerox — Print Document</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+  <style>
+    /* Page-local layout only — all visual styling comes from /assets/app.css. */
+    .doc-stage {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      min-height: 60vh;
+    }
+    .doc-stage iframe {
+      display: block;
+      width: 100%;
+      height: 78vh;
+      border: 0;
+      background: #fff;
+    }
+    .doc-stage .doc-img {
+      max-width: 100%;
+      max-height: 82vh;
+      margin: 0 auto;
+      display: block;
+    }
+    .img-pad { padding: 18px; text-align: center; }
+
+    /* On print: hide everything except the document so the iframe/image prints clean. */
+    @media print {
+      .topbar, .no-print, .footer { display: none !important; }
+      body { background: #fff !important; }
+      .container { max-width: none; padding: 0; }
+      .doc-stage { border: 0; box-shadow: none; border-radius: 0; min-height: 0; }
+      .doc-stage iframe { height: auto; min-height: 100vh; }
+      .doc-stage .doc-img { max-height: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="topbar no-print">
+    <div class="container">
+      <div class="brand">
+        <div class="crest">🖨️</div>
+        <div>
+          <h1>Campus Xerox</h1>
+          <div class="sub" id="hdrName">Print Document</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn btn-onnavy" id="btnPrintTop">Print</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container container--narrow" style="padding-top:22px; padding-bottom:22px;">
+    <div class="stack">
+
+      <!-- Missing id / error state -->
+      <section id="errCard" class="card hidden">
+        <div class="card-head">
+          <div>
+            <h2 class="title">Cannot open document</h2>
+            <p class="desc">The print link is missing required information.</p>
+          </div>
+        </div>
+        <div class="card-body stack">
+          <div class="alert alert-error" id="errMsg">No file was specified to print.</div>
+          <a class="btn btn-ghost btn-block" href="/">Back to Campus Xerox</a>
+        </div>
+      </section>
+
+      <!-- Document toolbar -->
+      <section id="toolCard" class="card hidden">
+        <div class="card-head">
+          <div>
+            <h2 class="title" id="fileTitle">Document</h2>
+            <p class="desc" id="fileSub">Ready to print</p>
+          </div>
+          <span class="badge badge-blue" id="typeBadge">FILE</span>
+        </div>
+        <div class="card-body">
+          <div class="row gap wrap no-print">
+            <button type="button" class="btn btn-success" id="btnPrint">Print this document</button>
+            <a class="btn btn-ghost" id="btnDownload" href="#">Download</a>
+            <a class="btn btn-ghost" id="btnDrive" href="#" target="_blank" rel="noopener">Open in Google Drive</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Unsupported file notice (docx, etc.) -->
+      <section id="notViewable" class="card hidden">
+        <div class="card-body stack">
+          <div class="alert alert-info" id="notViewableMsg">
+            This file type cannot be displayed or printed directly in the browser.
+            Open it in Google Drive to print, or download the original file.
+          </div>
+          <a class="btn btn-primary btn-lg btn-block" id="btnDriveBig" href="#" target="_blank" rel="noopener">Open in Google Drive to print</a>
+          <a class="btn btn-ghost btn-block" id="btnDownloadBig" href="#">Download original file</a>
+        </div>
+      </section>
+
+      <!-- Viewable document stage (pdf iframe / image) -->
+      <section id="stageCard" class="doc-stage hidden">
+        <div id="stageInner"></div>
+      </section>
+
+    </div>
+  </main>
+
+  <div class="footer no-print">Campus Xerox &middot; Auto-print</div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      function qp(name) {
+        try {
+          return new URLSearchParams(window.location.search).get(name);
+        } catch (e) {
+          return null;
+        }
+      }
+
+      var id   = qp("id");
+      var type = (qp("type") || "").toLowerCase().replace(/^\./, "").trim();
+      var name = qp("name") || "Document";
+      var view = qp("view") || "";
+
+      var els = {
+        errCard:        document.getElementById("errCard"),
+        errMsg:         document.getElementById("errMsg"),
+        toolCard:       document.getElementById("toolCard"),
+        notViewable:    document.getElementById("notViewable"),
+        notViewableMsg: document.getElementById("notViewableMsg"),
+        stageCard:      document.getElementById("stageCard"),
+        stageInner:     document.getElementById("stageInner"),
+        fileTitle:      document.getElementById("fileTitle"),
+        fileSub:        document.getElementById("fileSub"),
+        typeBadge:      document.getElementById("typeBadge"),
+        hdrName:        document.getElementById("hdrName"),
+        btnPrint:       document.getElementById("btnPrint"),
+        btnPrintTop:    document.getElementById("btnPrintTop"),
+        btnDownload:    document.getElementById("btnDownload"),
+        btnDrive:       document.getElementById("btnDrive"),
+        btnDriveBig:    document.getElementById("btnDriveBig"),
+        btnDownloadBig: document.getElementById("btnDownloadBig")
+      };
+
+      function show(el) { if (el) el.classList.remove("hidden"); }
+      function hide(el) { if (el) el.classList.add("hidden"); }
+
+      // ---- Missing id -> graceful error ----
+      if (!id) {
+        document.title = "Campus Xerox — Nothing to print";
+        if (els.errMsg) {
+          els.errMsg.textContent = "No file was specified to print. Please return to Campus Xerox and try again.";
+        }
+        show(els.errCard);
+        return;
+      }
+
+      var fileUrl = "/api/file?id=" + encodeURIComponent(id);
+
+      // ---- Header / toolbar metadata ----
+      document.title = "Campus Xerox — " + name;
+      if (els.hdrName)   els.hdrName.textContent = name;
+      if (els.fileTitle) els.fileTitle.textContent = name;
+      if (els.typeBadge) els.typeBadge.textContent = (type || "file").toUpperCase();
+
+      // Wire shared links.
+      if (els.btnDownload)    els.btnDownload.setAttribute("href", fileUrl);
+      if (els.btnDownloadBig) els.btnDownloadBig.setAttribute("href", fileUrl);
+      if (view) {
+        if (els.btnDrive)    els.btnDrive.setAttribute("href", view);
+        if (els.btnDriveBig) els.btnDriveBig.setAttribute("href", view);
+      } else {
+        // No Drive view url available — hide those buttons.
+        hide(els.btnDrive);
+        hide(els.btnDriveBig);
+      }
+
+      function manualPrint() {
+        try { window.print(); } catch (e) { /* no-op */ }
+      }
+      if (els.btnPrint)    els.btnPrint.addEventListener("click", manualPrint);
+      if (els.btnPrintTop) els.btnPrintTop.addEventListener("click", manualPrint);
+
+      var isPdf   = type === "pdf";
+      var isImage = type === "jpg" || type === "jpeg" || type === "png" || type === "gif" || type === "webp" || type === "bmp";
+
+      if (isPdf) {
+        show(els.toolCard);
+        show(els.stageCard);
+        if (els.fileSub) els.fileSub.textContent = "PDF document — printing automatically";
+
+        var iframe = document.createElement("iframe");
+        iframe.setAttribute("title", name);
+        iframe.setAttribute("src", fileUrl);
+        var printed = false;
+        iframe.addEventListener("load", function () {
+          if (printed) return;
+          printed = true;
+          // Short delay lets the embedded PDF viewer finish rendering before print.
+          setTimeout(function () {
+            try {
+              iframe.contentWindow.focus();
+              iframe.contentWindow.print();
+            } catch (e) {
+              // Cross-origin / sandbox guard: fall back to printing the page.
+              try { window.print(); } catch (e2) { /* no-op */ }
+            }
+            // Document stays visible afterwards for manual reprint.
+          }, 600);
+        });
+        iframe.addEventListener("error", function () {
+          if (els.fileSub) els.fileSub.textContent = "Could not load the PDF. Use Print or Download.";
+        });
+        els.stageInner.appendChild(iframe);
+
+      } else if (isImage) {
+        show(els.toolCard);
+        show(els.stageCard);
+        if (els.fileSub) els.fileSub.textContent = "Image — printing automatically";
+
+        var wrap = document.createElement("div");
+        wrap.className = "img-pad";
+        var img = document.createElement("img");
+        img.className = "doc-img";
+        img.setAttribute("alt", name);
+        img.setAttribute("src", fileUrl);
+        var imgPrinted = false;
+        img.addEventListener("load", function () {
+          if (imgPrinted) return;
+          imgPrinted = true;
+          setTimeout(manualPrint, 300);
+        });
+        img.addEventListener("error", function () {
+          if (els.fileSub) els.fileSub.textContent = "Could not load the image. Use Print or Download.";
+        });
+        wrap.appendChild(img);
+        els.stageInner.appendChild(wrap);
+
+      } else {
+        // Unsupported (docx, pptx, xlsx, etc.) — browsers can't render natively.
+        show(els.toolCard);
+        show(els.notViewable);
+        if (els.fileSub) els.fileSub.textContent = "This file type cannot be printed directly in the browser.";
+        if (els.notViewableMsg && type) {
+          els.notViewableMsg.textContent =
+            "“." + type + "” files cannot be displayed or printed directly in the browser. " +
+            "Open the document in Google Drive to print it, or download the original file.";
+        }
+        if (!view) {
+          // Without a Drive url, the big Drive button is meaningless — keep the toolbar's Download.
+          hide(els.btnDriveBig);
+        }
+      }
+    })();
+  </script>
+
+</body>
+</html>

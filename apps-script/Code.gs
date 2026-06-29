@@ -32,9 +32,39 @@ var MASTER_CATALOG_FOLDER_ID = 'PASTE_MASTER_CATALOG_FOLDER_ID';
 
 
 /**
- * Health / ping endpoint so the deployed URL is testable from a browser GET.
+ * GET endpoint.
+ *
+ *  - action=download&id=FILE_ID -> returns the file contents as base64 JSON so the
+ *    Cloudflare /api/file Function can stream the raw bytes for direct printing:
+ *      { success:true, base64, mimeType, name }
+ *    On any failure: { success:false, error }.
+ *
+ *  - no action (or any other action) -> health / ping payload so the deployed URL is
+ *    testable from a plain browser GET.
  */
 function doGet(e) {
+  var params = (e && e.parameter) ? e.parameter : {};
+
+  if (params.action === 'download') {
+    try {
+      var id = params.id;
+      if (!id) {
+        throw new Error('Missing file id');
+      }
+      var file = DriveApp.getFileById(id);
+      var blob = file.getBlob();
+      return jsonOutput({
+        success: true,
+        base64: Utilities.base64Encode(blob.getBytes()),
+        mimeType: blob.getContentType(),
+        name: file.getName()
+      });
+    } catch (err) {
+      return jsonOutput({ success: false, error: String(err) });
+    }
+  }
+
+  // Default: health / ping endpoint.
   return jsonOutput({
     success: true,
     service: 'Campus Xerox warehouse',
@@ -73,6 +103,40 @@ function doPost(e) {
       throw new Error('Missing fileName');
     }
 
+    // target: 'catalog' stores a permanent, reusable copy in the Master Catalog
+    // (used by the auto-promotion / dedup flow). Anything else -> Daily Pending.
+    var target = (payload.target === 'catalog') ? 'catalog' : 'pending';
+
+    // --- Configuration guard ---------------------------------------------------------
+    // Surface the "file not appearing in Master folder" misconfiguration early: if the
+    // operator never replaced the PASTE_ placeholders, DriveApp.getFolderById() would
+    // throw a cryptic "No item with the given ID could be found" error. Return a clear,
+    // actionable message instead so the operator knows to paste the real folder IDs.
+    if (DAILY_PENDING_FOLDER_ID === 'PASTE_DAILY_PENDING_FOLDER_ID') {
+      throw new Error(
+        'Apps Script is not configured: DAILY_PENDING_FOLDER_ID is still the ' +
+        'PASTE_ placeholder. Paste the real Daily Pending Drive folder ID into the ' +
+        'CONFIG block at the top of Code.gs and redeploy.'
+      );
+    }
+    if (target === 'catalog' && MASTER_CATALOG_FOLDER_ID === 'PASTE_MASTER_CATALOG_FOLDER_ID') {
+      throw new Error(
+        'Apps Script is not configured: MASTER_CATALOG_FOLDER_ID is still the ' +
+        'PASTE_ placeholder, so catalog files cannot be saved to the Master folder. ' +
+        'Paste the real Master Catalog Drive folder ID into the CONFIG block at the ' +
+        'top of Code.gs and redeploy.'
+      );
+    }
+    if (isCatalogItem && MASTER_CATALOG_FOLDER_ID === 'PASTE_MASTER_CATALOG_FOLDER_ID') {
+      throw new Error(
+        'Apps Script is not configured: MASTER_CATALOG_FOLDER_ID is still the ' +
+        'PASTE_ placeholder, so the Master catalog cannot be searched. Paste the real ' +
+        'Master Catalog Drive folder ID into the CONFIG block at the top of Code.gs ' +
+        'and redeploy.'
+      );
+    }
+    // ---------------------------------------------------------------------------------
+
     if (isCatalogItem) {
       // --- Catalog lookup: do NOT create a file, find the existing one by name. ---
       var catalogFolder = DriveApp.getFolderById(MASTER_CATALOG_FOLDER_ID);
@@ -101,9 +165,6 @@ function doPost(e) {
     var decodedBytes = Utilities.base64Decode(payload.fileBase64);
     var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
 
-    // target: 'catalog' stores a permanent, reusable copy in the Master Catalog
-    // (used by the auto-promotion / dedup flow). Anything else -> Daily Pending.
-    var target = (payload.target === 'catalog') ? 'catalog' : 'pending';
     var folderId = (target === 'catalog') ? MASTER_CATALOG_FOLDER_ID : DAILY_PENDING_FOLDER_ID;
     var folder = DriveApp.getFolderById(folderId);
     var file = folder.createFile(blob);

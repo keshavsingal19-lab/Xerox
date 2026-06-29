@@ -4,146 +4,203 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Campus Xerox — Print Token</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- pdf.js (Play CDN) for auto page-count detection. Wrapped in try/catch in JS; never fatal. -->
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <link rel="stylesheet" href="/assets/app.css" />
   <style>
-    /* Animated indeterminate tracking bar */
-    @keyframes trackSlide {
-      0%   { transform: translateX(-100%); }
-      100% { transform: translateX(400%); }
+    /* Minimal page-specific tweaks (drop zone + spinning step icon). No frameworks, no CDNs. */
+    .dropzone {
+      cursor: pointer; border: 2px dashed var(--line-2); border-radius: 12px;
+      padding: 30px 18px; text-align: center; background: #fff;
+      transition: border-color .15s, background .15s;
     }
-    .track-anim { animation: trackSlide 1.1s ease-in-out infinite; }
-    .drop-active { border-color: #2563eb; background-color: #eff6ff; }
+    .dropzone:hover { border-color: var(--blue-600); }
+    .dropzone.drop-active { border-color: var(--blue-600); background: var(--sky); }
+    .dropzone .dz-ic { font-size: 30px; margin-bottom: 6px; }
+    .dropzone .dz-title { font-size: 14px; color: var(--ink-2); font-weight: 600; }
+    .dropzone .dz-title b { color: var(--blue-700); }
+    .dropzone .dz-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .file-rm { background: none; border: none; cursor: pointer; color: var(--red); font-weight: 700; font-size: 12px; padding: 2px 4px; }
+    .file-rm:hover { text-decoration: underline; }
+    .steps li .ic.spin { display: inline-block; animation: spin .8s linear infinite; }
+    .track-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .track-head .lbl { font-size: 13px; font-weight: 700; color: var(--ink-2); }
+    .track-head .meta { display: flex; align-items: center; gap: 8px; }
+    .track-head .pct { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .success-box { border: 2px solid #bfe6cd; background: var(--green-50); border-radius: 14px; padding: 24px; text-align: center; }
+    .success-box .big { font-size: 36px; }
+    .success-box .head { font-size: 18px; font-weight: 800; color: var(--green); margin-top: 6px; }
+    .success-box .tok { display: inline-flex; align-items: baseline; gap: 10px; background: #fff; border: 1px solid #bfe6cd; border-radius: 12px; padding: 12px 20px; margin-top: 16px; box-shadow: var(--shadow-sm); }
+    .success-box .tok .tl { font-size: 13px; font-weight: 700; color: var(--muted); }
+    .success-box .tok .tn { font-family: var(--mono); font-size: 30px; font-weight: 800; color: var(--green-600); }
+    .is-locked { opacity: .5; pointer-events: none; }
   </style>
 </head>
-<body class="bg-slate-100 min-h-screen text-slate-800 antialiased">
-  <div class="max-w-2xl mx-auto px-4 py-8 sm:py-12">
-
-    <!-- Header -->
-    <header class="mb-8 text-center">
-      <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600 text-white text-2xl shadow-lg shadow-blue-200 mb-3">🖨️</div>
-      <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">Campus Xerox &amp; Print</h1>
-      <p class="text-slate-500 mt-1 text-sm sm:text-base">Upload your files, get a token, pay cash at the counter. No card, no login.</p>
-    </header>
-
-    <!-- FORM CARD -->
-    <section id="formCard" class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-7">
-      <!-- Student identity -->
-      <label class="block mb-1 text-sm font-semibold text-slate-700" for="studentId">Name / Roll Number <span class="text-red-500">*</span></label>
-      <input id="studentId" type="text" autocomplete="off"
-             placeholder="e.g. Aarav Sharma / CS21B045"
-             class="w-full rounded-xl border border-slate-300 px-4 py-2.5 mb-5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-
-      <!-- Drop zone -->
-      <label class="block mb-1 text-sm font-semibold text-slate-700">Files to print <span class="text-red-500">*</span></label>
-      <div id="dropZone"
-           class="cursor-pointer rounded-xl border-2 border-dashed border-slate-300 px-4 py-8 text-center transition-colors hover:border-blue-400 mb-3">
-        <div class="text-3xl mb-2">📄</div>
-        <p class="text-sm text-slate-600"><span class="font-semibold text-blue-600">Click to browse</span> or drag &amp; drop</p>
-        <p class="text-xs text-slate-400 mt-1">Accepted: PDF, DOCX, JPG, JPEG &middot; Multiple files allowed</p>
-      </div>
-      <input id="fileInput" type="file" accept=".pdf,.docx,.jpg,.jpeg" multiple class="hidden" />
-
-      <!-- Selected file list -->
-      <ul id="fileList" class="space-y-2 mb-3 hidden"></ul>
-
-      <!-- Validation alert -->
-      <div id="sizeAlert" class="hidden mb-4 rounded-xl border border-red-300 bg-red-50 text-red-700 px-4 py-3 text-sm font-medium"></div>
-
-      <!-- Print spec grid -->
-      <div class="grid grid-cols-2 gap-4 mt-5">
+<body>
+  <!-- ===================== Official header ===================== -->
+  <header class="topbar">
+    <div class="container">
+      <div class="brand">
+        <div class="crest">🖨️</div>
         <div>
-          <label class="block mb-1 text-sm font-semibold text-slate-700" for="pages">Pages (per copy)</label>
-          <input id="pages" type="number" min="1" step="1" value="1"
-                 class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-          <p id="pagesHint" class="text-xs text-slate-400 mt-1">Auto-filled from PDF; edit if needed.</p>
-        </div>
-        <div>
-          <label class="block mb-1 text-sm font-semibold text-slate-700" for="copies">Copies</label>
-          <input id="copies" type="number" min="1" step="1" value="1"
-                 class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-        </div>
-        <div>
-          <label class="block mb-1 text-sm font-semibold text-slate-700" for="layout">Layout</label>
-          <select id="layout"
-                  class="w-full rounded-xl border border-slate-300 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-            <option value="Single Sided">Single Sided</option>
-            <option value="Double Sided">Double Sided</option>
-          </select>
-        </div>
-        <div>
-          <label class="block mb-1 text-sm font-semibold text-slate-700" for="color">Color</label>
-          <select id="color"
-                  class="w-full rounded-xl border border-slate-300 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-            <option value="B&amp;W">B&amp;W</option>
-            <option value="Color">Color</option>
-          </select>
+          <h1>Campus Xerox</h1>
+          <div class="sub">Upload, get a token, pay cash at the counter</div>
         </div>
       </div>
-
-      <!-- Live cost -->
-      <div class="mt-6 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-4 flex items-center justify-between">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Cash due at counter</p>
-          <p id="costBreakdown" class="text-xs text-emerald-600 mt-0.5">Add files to see the price.</p>
-        </div>
-        <p id="costTotal" class="text-2xl font-extrabold text-emerald-700">&#8377;0</p>
+      <div class="actions">
+        <button id="staffLoginBtn" type="button" class="btn btn-onnavy btn-sm">Staff Login</button>
       </div>
+    </div>
+  </header>
 
-      <!-- Submit -->
-      <button id="submitBtn"
-              class="mt-6 w-full rounded-xl bg-blue-600 text-white font-bold py-3.5 text-base shadow-lg shadow-blue-200 transition hover:bg-blue-700 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed">
-        Generate Print Token
-      </button>
-      <div id="formError" class="hidden mt-4 rounded-xl border border-red-300 bg-red-50 text-red-700 px-4 py-3 text-sm font-medium"></div>
-    </section>
+  <main class="container container--narrow" style="padding-top:24px; padding-bottom:24px;">
+    <div class="stack">
 
-    <!-- PROGRESS / RESULT CARD -->
-    <section id="resultCard" class="hidden bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-7 mt-6">
-      <!-- Token display -->
-      <div class="text-center">
-        <p class="text-sm font-semibold uppercase tracking-wide text-slate-500">Your Token</p>
-        <p id="tokenBig" class="text-6xl sm:text-7xl font-black text-blue-600 tracking-tight my-2">#---</p>
-      </div>
-
-      <!-- Tracking progress bar -->
-      <div id="trackWrap" class="mt-6">
-        <div class="flex items-center justify-between mb-2">
-          <span id="trackLabel" class="text-sm font-semibold text-slate-700">Reserving token&hellip;</span>
-          <span class="flex items-center gap-2">
-            <span id="trackTimer" class="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-mono font-bold text-blue-700 tabular-nums">0.0s</span>
-            <span id="trackPct" class="text-xs font-mono text-slate-400">0%</span>
-          </span>
-        </div>
-        <div class="h-2.5 w-full rounded-full bg-slate-200 overflow-hidden">
-          <div id="trackBar" class="h-full rounded-full bg-blue-600 relative overflow-hidden" style="width:0%; transition:width .4s ease;">
-            <div class="absolute inset-0 bg-white/30 w-1/4 track-anim"></div>
+      <!-- ===================== FORM CARD ===================== -->
+      <section id="formCard" class="card">
+        <div class="card-head">
+          <div>
+            <p class="title">New Print Job</p>
+            <p class="desc">No card, no login — just upload and collect your token.</p>
           </div>
         </div>
-        <ul id="trackSteps" class="mt-4 space-y-1.5 text-sm"></ul>
-      </div>
+        <div class="card-body">
 
-      <!-- Per-step error -->
-      <div id="stepError" class="hidden mt-4 rounded-xl border border-red-300 bg-red-50 text-red-700 px-4 py-3 text-sm font-medium"></div>
+          <!-- Student identity -->
+          <div class="field">
+            <label class="label" for="studentId">Name / Roll Number <span class="req">*</span></label>
+            <input id="studentId" type="text" autocomplete="off" class="input"
+                   placeholder="e.g. Aarav Sharma / CS21B045" />
+          </div>
 
-      <!-- Success badge -->
-      <div id="successBadge" class="hidden mt-6 rounded-2xl border-2 border-emerald-300 bg-emerald-50 px-5 py-6 text-center">
-        <div class="text-4xl mb-2">✅</div>
-        <p class="text-lg font-extrabold text-emerald-700">Token Active.</p>
-        <p class="text-sm text-emerald-700 mt-1">You can now close this tab. Give this number to a friend to collect if needed.</p>
-        <div class="mt-4 inline-flex items-baseline gap-2 rounded-xl bg-white border border-emerald-200 px-5 py-3 shadow-sm">
-          <span class="text-sm font-semibold text-slate-500">Token</span>
-          <span id="successToken" class="text-3xl font-black text-emerald-600">#---</span>
+          <!-- Drop zone -->
+          <div class="field">
+            <label class="label">Files to print <span class="req">*</span></label>
+            <div id="dropZone" class="dropzone">
+              <div class="dz-ic">📄</div>
+              <div class="dz-title"><b>Click to browse</b> or drag &amp; drop</div>
+              <div class="dz-sub">Accepted: PDF, DOCX, JPG, JPEG · Multiple files allowed</div>
+            </div>
+            <input id="fileInput" type="file" accept=".pdf,.docx,.jpg,.jpeg" multiple class="hidden" />
+          </div>
+
+          <!-- Selected file list -->
+          <div id="fileList" class="hidden" style="margin-bottom:16px;"></div>
+
+          <!-- Validation alert -->
+          <div id="sizeAlert" class="alert alert-error hidden" style="margin-bottom:16px;"></div>
+
+          <!-- Print spec grid -->
+          <div class="grid-2">
+            <div class="field" style="margin-bottom:0;">
+              <label class="label" for="pages">Pages (per copy)</label>
+              <input id="pages" type="number" min="1" step="1" value="1" class="input" />
+              <p id="pagesHint" class="hint">Enter the page count (default 1).</p>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label class="label" for="copies">Copies</label>
+              <input id="copies" type="number" min="1" step="1" value="1" class="input" />
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label class="label" for="layout">Layout</label>
+              <select id="layout" class="select">
+                <option value="Single Sided">Single Sided</option>
+                <option value="Double Sided">Double Sided</option>
+              </select>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <label class="label" for="color">Color</label>
+              <select id="color" class="select">
+                <option value="B&amp;W">B&amp;W</option>
+                <option value="Color">Color</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Live cost -->
+          <div class="total-banner row between" style="margin-top:22px;">
+            <div>
+              <div class="label">Cash Due At Counter</div>
+              <div id="costBreakdown" style="font-size:12px; color:rgba(255,255,255,.9); margin-top:6px;">Add files to see the price.</div>
+            </div>
+            <div id="costTotal" class="amount" style="font-size:40px;">&#8377;0</div>
+          </div>
+
+          <!-- Submit -->
+          <button id="submitBtn" type="button" class="btn btn-primary btn-lg btn-block" style="margin-top:22px;">
+            Generate Print Token
+          </button>
+          <div id="formError" class="alert alert-error hidden" style="margin-top:16px;"></div>
         </div>
-        <p id="successCash" class="text-sm text-slate-600 mt-3"></p>
-        <button id="newOrderBtn" class="mt-5 text-sm font-semibold text-blue-600 hover:underline">Start a new print job</button>
-      </div>
-    </section>
+      </section>
 
-    <footer class="text-center text-xs text-slate-400 mt-8">
-      100% free &middot; cardless &middot; auto-clears after 2 hours
-    </footer>
+      <!-- ===================== PROGRESS / RESULT CARD ===================== -->
+      <section id="resultCard" class="card hidden">
+        <div class="card-body">
+          <!-- Token display -->
+          <div class="token-hero">
+            <div class="cap">Your Token</div>
+            <div id="tokenBig" class="num">#---</div>
+          </div>
+
+          <!-- Tracking progress bar -->
+          <div id="trackWrap" style="margin-top:18px;">
+            <div class="track-head">
+              <span id="trackLabel" class="lbl">Reserving token…</span>
+              <span class="meta">
+                <span id="trackTimer" class="timer-chip">0.0s</span>
+                <span id="trackPct" class="pct">0%</span>
+              </span>
+            </div>
+            <div class="progress"><div id="trackBar" class="bar" style="width:0%;"></div></div>
+            <ul id="trackSteps" class="steps"></ul>
+          </div>
+
+          <!-- Per-step error -->
+          <div id="stepError" class="alert alert-error hidden" style="margin-top:16px;"></div>
+
+          <!-- Success badge -->
+          <div id="successBadge" class="success-box hidden" style="margin-top:20px;">
+            <div class="big">✅</div>
+            <div class="head">Token Active.</div>
+            <p class="muted" style="font-size:13px; margin:6px 0 0;">You can now close this tab. Give this number to a friend to collect if needed.</p>
+            <div class="tok">
+              <span class="tl">Token</span>
+              <span id="successToken" class="tn">#---</span>
+            </div>
+            <p id="successCash" class="muted" style="font-size:13px; margin-top:14px;"></p>
+            <button id="newOrderBtn" type="button" class="btn btn-ghost btn-sm" style="margin-top:18px;">Start a new print job</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="footer">100% free · cardless · auto-clears after 2 hours</div>
+    </div>
+  </main>
+
+  <!-- ===================== Staff Login modal ===================== -->
+  <div class="modal" id="loginModal">
+    <div class="modal-card">
+      <div class="card-head">
+        <div>
+          <p class="title">Staff Login</p>
+          <p class="desc">Counter access only.</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="field">
+          <label class="label" for="loginUser">Username <span class="req">*</span></label>
+          <input id="loginUser" type="text" autocomplete="username" class="input" placeholder="Username" />
+        </div>
+        <div class="field">
+          <label class="label" for="loginPass">Password <span class="req">*</span></label>
+          <input id="loginPass" type="password" autocomplete="current-password" class="input" placeholder="Password" />
+        </div>
+        <div id="loginError" class="alert alert-error hidden" style="margin-bottom:16px;"></div>
+        <div class="row gap">
+          <button id="loginSubmit" type="button" class="btn btn-primary btn-block">Sign in</button>
+          <button id="loginCancel" type="button" class="btn btn-ghost">Cancel</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -243,32 +300,40 @@
     fileListEl.classList.remove("hidden");
     fileListEl.innerHTML = "";
     selectedFiles.forEach((f, i) => {
-      const li = document.createElement("li");
-      li.className = "flex items-center justify-between gap-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2";
-      const left = document.createElement("div");
-      left.className = "min-w-0 flex items-center gap-2";
-      left.innerHTML =
-        '<span class="text-lg shrink-0">' + iconFor(f.name) + '</span>' +
-        '<span class="truncate text-sm font-medium text-slate-700"></span>';
-      left.querySelector("span.truncate").textContent = f.name;
-      const right = document.createElement("div");
-      right.className = "flex items-center gap-3 shrink-0";
-      const size = document.createElement("span");
-      size.className = "text-xs text-slate-400";
-      size.textContent = fmtBytes(f.size);
+      const row = document.createElement("div");
+      row.className = "file-row";
+
+      const ic = document.createElement("div");
+      ic.className = "file-ic";
+      ic.textContent = iconFor(f.name);
+
+      const main = document.createElement("div");
+      main.className = "file-main";
+      const nm = document.createElement("div");
+      nm.className = "file-name";
+      nm.textContent = f.name;
+      const meta = document.createElement("div");
+      meta.className = "file-meta";
+      meta.textContent = fmtBytes(f.size);
+      main.appendChild(nm);
+      main.appendChild(meta);
+
+      const actions = document.createElement("div");
+      actions.className = "file-actions";
       const rm = document.createElement("button");
       rm.type = "button";
-      rm.className = "text-xs font-semibold text-red-500 hover:text-red-700";
+      rm.className = "file-rm";
       rm.textContent = "Remove";
       rm.addEventListener("click", () => {
         selectedFiles.splice(i, 1);
         afterFileChange();
       });
-      right.appendChild(size);
-      right.appendChild(rm);
-      li.appendChild(left);
-      li.appendChild(right);
-      fileListEl.appendChild(li);
+      actions.appendChild(rm);
+
+      row.appendChild(ic);
+      row.appendChild(main);
+      row.appendChild(actions);
+      fileListEl.appendChild(row);
     });
   }
 
@@ -298,21 +363,41 @@
     costTotal.textContent = RUPEE + total;
   }
 
-  // Auto page-count from the first PDF (pdf.js). Manual input remains authoritative —
-  // we only overwrite if the user has not changed the field from the default.
+  // Auto page-count from the first PDF — OPTIONAL and lazy.
+  // pdf.js is NOT loaded at page load. We inject it the first time a PDF is added,
+  // inside try/catch, and it never blocks typing or submission. Manual input remains
+  // authoritative: we only auto-fill while the user hasn't touched the Pages field.
+  let pdfjsLoading = null;
+  function loadPdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (pdfjsLoading) return pdfjsLoading;
+    pdfjsLoading = new Promise((resolve, reject) => {
+      try {
+        const s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js";
+        s.async = true;
+        s.onload = () => resolve(window.pdfjsLib || null);
+        s.onerror = () => reject(new Error("pdf.js failed to load"));
+        document.head.appendChild(s);
+      } catch (e) { reject(e); }
+    });
+    return pdfjsLoading;
+  }
+
   async function tryAutoPageCount() {
     const pdf = selectedFiles.find((f) => f.name.toLowerCase().endsWith(".pdf"));
     if (!pdf) return;
     // Only auto-fill while the field is untouched (still at default "1").
     if (pagesEl.dataset.touched === "1") return;
     try {
-      if (typeof pdfjsLib === "undefined") return;
+      const lib = await loadPdfJs();
+      if (!lib) return;
       try {
-        pdfjsLib.GlobalWorkerOptions.workerSrc =
+        lib.GlobalWorkerOptions.workerSrc =
           "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
       } catch (e) { /* worker optional */ }
       const buf = await pdf.arrayBuffer();
-      const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+      const doc = await lib.getDocument({ data: buf }).promise;
       if (doc && doc.numPages && pagesEl.dataset.touched !== "1") {
         pagesEl.value = doc.numPages;
         pagesHint.textContent = "Auto-detected " + doc.numPages + " page(s) from " + pdf.name + ". Edit if needed.";
@@ -320,7 +405,7 @@
       }
     } catch (err) {
       // Silent fallback: manual entry is authoritative.
-      pagesHint.textContent = "Could not auto-read pages. Please enter the page count.";
+      pagesHint.textContent = "Enter the page count (default 1).";
     }
   }
 
@@ -376,24 +461,25 @@
     STEP_KEYS.forEach((k) => {
       const li = document.createElement("li");
       li.id = "step-" + k;
-      li.className = "flex items-center gap-2 text-slate-400";
-      li.innerHTML = '<span class="step-icon">○</span><span>' + labels[k] + '</span>';
+      li.innerHTML = '<span class="ic">○</span><span>' + labels[k] + '</span>';
       trackSteps.appendChild(li);
     });
   }
   function setStep(key, state) {
     const li = $("step-" + key);
     if (!li) return;
-    const icon = li.querySelector(".step-icon");
+    const icon = li.querySelector(".ic");
+    li.classList.remove("active", "done", "err");
+    if (icon) icon.classList.remove("spin");
     if (state === "active") {
-      li.className = "flex items-center gap-2 text-blue-600 font-medium";
-      icon.textContent = "◐";
+      li.classList.add("active");
+      if (icon) { icon.textContent = "◐"; icon.classList.add("spin"); }
     } else if (state === "done") {
-      li.className = "flex items-center gap-2 text-emerald-600";
-      icon.textContent = "✔";
+      li.classList.add("done");
+      if (icon) icon.textContent = "✔";
     } else if (state === "error") {
-      li.className = "flex items-center gap-2 text-red-600 font-medium";
-      icon.textContent = "✖";
+      li.classList.add("err");
+      if (icon) icon.textContent = "✖";
     }
   }
   /* ============================ Real elapsed timer ============================ */
@@ -557,7 +643,7 @@
     submitBtn.textContent = "Working…";
     hideAlert(stepError);
     successBadge.classList.add("hidden");
-    formCard.classList.add("opacity-50", "pointer-events-none");
+    formCard.classList.add("is-locked");
     resultCard.classList.remove("hidden");
     tokenBig.textContent = "#---";
     buildSteps();
@@ -675,7 +761,7 @@
     showAlert(stepError, msg);
     submitBtn.disabled = false;
     submitBtn.textContent = "Generate Print Token";
-    formCard.classList.remove("opacity-50", "pointer-events-none");
+    formCard.classList.remove("is-locked");
   }
 
   /* ============================ New order reset ============================ */
@@ -684,7 +770,7 @@
     studentIdEl.value = "";
     pagesEl.value = "1";
     delete pagesEl.dataset.touched;
-    pagesHint.textContent = "Auto-filled from PDF; edit if needed.";
+    pagesHint.textContent = "Enter the page count (default 1).";
     copiesEl.value = "1";
     layoutEl.value = "Single Sided";
     colorEl.value = "B&W";
@@ -697,9 +783,73 @@
     successBadge.classList.add("hidden");
     submitBtn.disabled = false;
     submitBtn.textContent = "Generate Print Token";
-    formCard.classList.remove("opacity-50", "pointer-events-none");
+    formCard.classList.remove("is-locked");
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
+
+  /* ============================ Staff Login modal ============================ */
+  const loginModal  = $("loginModal");
+  const loginBtn    = $("staffLoginBtn");
+  const loginUser   = $("loginUser");
+  const loginPass   = $("loginPass");
+  const loginError  = $("loginError");
+  const loginSubmit = $("loginSubmit");
+  const loginCancel = $("loginCancel");
+
+  function openLogin() {
+    hideAlert(loginError);
+    loginModal.classList.add("open");
+    setTimeout(() => { try { loginUser.focus(); } catch (e) {} }, 50);
+  }
+  function closeLogin() {
+    loginModal.classList.remove("open");
+  }
+
+  async function doLogin() {
+    hideAlert(loginError);
+    const username = loginUser.value.trim();
+    const password = loginPass.value;
+    if (!username || !password) {
+      showAlert(loginError, "Enter both username and password.");
+      return;
+    }
+    loginSubmit.disabled = true;
+    loginSubmit.textContent = "Signing in…";
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username, password: password })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data && data.success) {
+        window.location = "/shopkeeper.html";
+        return;
+      }
+      showAlert(loginError, (data && data.error) ? data.error : "Invalid credentials");
+    } catch (e) {
+      showAlert(loginError, "Could not reach the server. Please try again.");
+    } finally {
+      loginSubmit.disabled = false;
+      loginSubmit.textContent = "Sign in";
+    }
+  }
+
+  loginBtn.addEventListener("click", openLogin);
+  loginCancel.addEventListener("click", closeLogin);
+  loginSubmit.addEventListener("click", doLogin);
+  loginPass.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+  loginUser.addEventListener("keydown", (e) => { if (e.key === "Enter") loginPass.focus(); });
+  loginModal.addEventListener("click", (e) => { if (e.target === loginModal) closeLogin(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && loginModal.classList.contains("open")) closeLogin();
+  });
+
+  // ?login=1 auto-opens the modal on load.
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("login") === "1") openLogin();
+  } catch (e) { /* no-op */ }
   </script>
 </body>
 </html>
