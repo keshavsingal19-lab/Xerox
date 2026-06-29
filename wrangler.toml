@@ -1,0 +1,8 @@
+name = "campus-xerox"
+compatibility_date = "2026-06-29"
+pages_build_output_dir = "."
+
+[[d1_databases]]
+binding = "DB"
+database_name = "xerox_db"
+database_id = "PASTE_D1_DATABASE_ID"

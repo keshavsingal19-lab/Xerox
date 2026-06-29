@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Campus Xerox — Print Token</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- pdf.js (Play CDN) for auto page-count detection. Wrapped in try/catch in JS; never fatal. -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <style>
+    /* Animated indeterminate tracking bar */
+    @keyframes trackSlide {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(400%); }
+    }
+    .track-anim { animation: trackSlide 1.1s ease-in-out infinite; }
+    .drop-active { border-color: #2563eb; background-color: #eff6ff; }
+  </style>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 antialiased">
+  <div class="max-w-2xl mx-auto px-4 py-8 sm:py-12">
+
+    <!-- Header -->
+    <header class="mb-8 text-center">
+      <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-600 text-white text-2xl shadow-lg shadow-blue-200 mb-3">🖨️</div>
+      <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">Campus Xerox &amp; Print</h1>
+      <p class="text-slate-500 mt-1 text-sm sm:text-base">Upload your files, get a token, pay cash at the counter. No card, no login.</p>
+    </header>
+
+    <!-- FORM CARD -->
+    <section id="formCard" class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-7">
+      <!-- Student identity -->
+      <label class="block mb-1 text-sm font-semibold text-slate-700" for="studentId">Name / Roll Number <span class="text-red-500">*</span></label>
+      <input id="studentId" type="text" autocomplete="off"
+             placeholder="e.g. Aarav Sharma / CS21B045"
+             class="w-full rounded-xl border border-slate-300 px-4 py-2.5 mb-5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+
+      <!-- Drop zone -->
+      <label class="block mb-1 text-sm font-semibold text-slate-700">Files to print <span class="text-red-500">*</span></label>
+      <div id="dropZone"
+           class="cursor-pointer rounded-xl border-2 border-dashed border-slate-300 px-4 py-8 text-center transition-colors hover:border-blue-400 mb-3">
+        <div class="text-3xl mb-2">📄</div>
+        <p class="text-sm text-slate-600"><span class="font-semibold text-blue-600">Click to browse</span> or drag &amp; drop</p>
+        <p class="text-xs text-slate-400 mt-1">Accepted: PDF, DOCX, JPG, JPEG &middot; Multiple files allowed</p>
+      </div>
+      <input id="fileInput" type="file" accept=".pdf,.docx,.jpg,.jpeg" multiple class="hidden" />
+
+      <!-- Selected file list -->
+      <ul id="fileList" class="space-y-2 mb-3 hidden"></ul>
+
+      <!-- Validation alert -->
+      <div id="sizeAlert" class="hidden mb-4 rounded-xl border border-red-300 bg-red-50 text-red-700 px-4 py-3 text-sm font-medium"></div>
+
+      <!-- Print spec grid -->
+      <div class="grid grid-cols-2 gap-4 mt-5">
+        <div>
+          <label class="block mb-1 text-sm font-semibold text-slate-700" for="pages">Pages (per copy)</label>
+          <input id="pages" type="number" min="1" step="1" value="1"
+                 class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          <p id="pagesHint" class="text-xs text-slate-400 mt-1">Auto-filled from PDF; edit if needed.</p>
+        </div>
+        <div>
+          <label class="block mb-1 text-sm font-semibold text-slate-700" for="copies">Copies</label>
+          <input id="copies" type="number" min="1" step="1" value="1"
+                 class="w-full rounded-xl border border-slate-300 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+        </div>
+        <div>
+          <label class="block mb-1 text-sm font-semibold text-slate-700" for="layout">Layout</label>
+          <select id="layout"
+                  class="w-full rounded-xl border border-slate-300 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            <option value="Single Sided">Single Sided</option>
+            <option value="Double Sided">Double Sided</option>
+          </select>
+        </div>
+        <div>
+          <label class="block mb-1 text-sm font-semibold text-slate-700" for="color">Color</label>
+          <select id="color"
+                  class="w-full rounded-xl border border-slate-300 px-4 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            <option value="B&amp;W">B&amp;W</option>
+            <option value="Color">Color</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Live cost -->
+      <div class="mt-6 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-4 flex items-center justify-between">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Cash due at counter</p>
+          <p id="costBreakdown" class="text-xs text-emerald-600 mt-0.5">Add files to see the price.</p>
+        </div>
+        <p id="costTotal" class="text-2xl font-extrabold text-emerald-700">&#8377;0</p>
+      </div>
+
+      <!-- Submit -->
+      <button id="submitBtn"
+              class="mt-6 w-full rounded-xl bg-blue-600 text-white font-bold py-3.5 text-base shadow-lg shadow-blue-200 transition hover:bg-blue-700 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed">
+        Generate Print Token
+      </button>
+      <div id="formError" class="hidden mt-4 rounded-xl border border-red-300 bg-red-50 text-red-700 px-4 py-3 text-sm font-medium"></div>
+    </section>
+
+    <!-- PROGRESS / RESULT CARD -->
+    <section id="resultCard" class="hidden bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-7 mt-6">
+      <!-- Token display -->
+      <div class="text-center">
+        <p class="text-sm font-semibold uppercase tracking-wide text-slate-500">Your Token</p>
+        <p id="tokenBig" class="text-6xl sm:text-7xl font-black text-blue-600 tracking-tight my-2">#---</p>
+      </div>
+
+      <!-- Tracking progress bar -->
+      <div id="trackWrap" class="mt-6">
+        <div class="flex items-center justify-between mb-2">
+          <span id="trackLabel" class="text-sm font-semibold text-slate-700">Reserving token&hellip;</span>
+          <span id="trackPct" class="text-xs font-mono text-slate-400">0%</span>
+        </div>
+        <div class="h-2.5 w-full rounded-full bg-slate-200 overflow-hidden">
+          <div id="trackBar" class="h-full rounded-full bg-blue-600 relative overflow-hidden" style="width:0%; transition:width .4s ease;">
+            <div class="absolute inset-0 bg-white/30 w-1/4 track-anim"></div>
+          </div>
+        </div>
+        <ul id="trackSteps" class="mt-4 space-y-1.5 text-sm"></ul>
+      </div>
+
+      <!-- Per-step error -->
+      <div id="stepError" class="hidden mt-4 rounded-xl border border-red-300 bg-red-50 text-red-700 px-4 py-3 text-sm font-medium"></div>
+
+      <!-- Success badge -->
+      <div id="successBadge" class="hidden mt-6 rounded-2xl border-2 border-emerald-300 bg-emerald-50 px-5 py-6 text-center">
+        <div class="text-4xl mb-2">✅</div>
+        <p class="text-lg font-extrabold text-emerald-700">Token Active.</p>
+        <p class="text-sm text-emerald-700 mt-1">You can now close this tab. Give this number to a friend to collect if needed.</p>
+        <div class="mt-4 inline-flex items-baseline gap-2 rounded-xl bg-white border border-emerald-200 px-5 py-3 shadow-sm">
+          <span class="text-sm font-semibold text-slate-500">Token</span>
+          <span id="successToken" class="text-3xl font-black text-emerald-600">#---</span>
+        </div>
+        <p id="successCash" class="text-sm text-slate-600 mt-3"></p>
+        <button id="newOrderBtn" class="mt-5 text-sm font-semibold text-blue-600 hover:underline">Start a new print job</button>
+      </div>
+    </section>
+
+    <footer class="text-center text-xs text-slate-400 mt-8">
+      100% free &middot; cardless &middot; auto-clears after 2 hours
+    </footer>
+  </div>
+
+  <script>
+  /* ============================ CONFIG ============================ */
+  // PASTE the deployed Google Apps Script Web App URL here (ends with /exec).
+  const GAS_WEB_APP_URL = "https://script.google.com/macros/u/5/s/AKfycbz0IxcKOyFLD-o-WPKbq-qvLAmgJJSB1aFgVJf159icd9-NyFPjkSDnhk2ntsPm7Zdu/exec";
+
+  /* ============================ PRICING (contract) ============================ */
+  // ratePerPage = Color ? 5 : 2; if Double Sided ratePerPage += 1; total = rate * pages * copies.
+  function computeRatePerPage(color, layout) {
+    let rate = (color === "Color") ? 5 : 2;
+    if (layout === "Double Sided") rate += 1;
+    return rate;
+  }
+  function computeTotal(color, layout, pages, copies) {
+    return computeRatePerPage(color, layout) * pages * copies;
+  }
+
+  const RUPEE = String.fromCharCode(8377); // ₹
+
+  /* ============================ Size limits (contract validation) ============================ */
+  const SINGLE_MAX = 25 * 1024 * 1024;   // Rule A: 1 file > 25 MB -> reject
+  const MULTI_MAX  = 100 * 1024 * 1024;  // Rule B: many files cumulative > 100 MB -> reject
+
+  /* ============================ State ============================ */
+  let selectedFiles = []; // Array<File>
+
+  /* ============================ DOM refs ============================ */
+  const $ = (id) => document.getElementById(id);
+  const studentIdEl = $("studentId");
+  const dropZone    = $("dropZone");
+  const fileInput   = $("fileInput");
+  const fileListEl  = $("fileList");
+  const sizeAlert   = $("sizeAlert");
+  const pagesEl     = $("pages");
+  const pagesHint   = $("pagesHint");
+  const copiesEl    = $("copies");
+  const layoutEl    = $("layout");
+  const colorEl     = $("color");
+  const costBreakdown = $("costBreakdown");
+  const costTotal   = $("costTotal");
+  const submitBtn   = $("submitBtn");
+  const formError   = $("formError");
+
+  const formCard    = $("formCard");
+  const resultCard  = $("resultCard");
+  const tokenBig    = $("tokenBig");
+  const trackLabel  = $("trackLabel");
+  const trackPct    = $("trackPct");
+  const trackBar    = $("trackBar");
+  const trackSteps  = $("trackSteps");
+  const stepError   = $("stepError");
+  const successBadge= $("successBadge");
+  const successToken= $("successToken");
+  const successCash = $("successCash");
+  const newOrderBtn = $("newOrderBtn");
+
+  /* ============================ Helpers ============================ */
+  function fmtBytes(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function showAlert(el, msg) {
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+  function hideAlert(el) {
+    el.textContent = "";
+    el.classList.add("hidden");
+  }
+
+  function totalBytes() {
+    return selectedFiles.reduce((s, f) => s + f.size, 0);
+  }
+
+  // Returns an error string if invalid, otherwise "".
+  function validateSizes() {
+    if (selectedFiles.length === 1 && selectedFiles[0].size > SINGLE_MAX) {
+      return "That file is " + fmtBytes(selectedFiles[0].size) + ". A single file must be 25 MB or smaller.";
+    }
+    if (selectedFiles.length > 1 && totalBytes() > MULTI_MAX) {
+      return "Your files total " + fmtBytes(totalBytes()) + ". When uploading multiple files the combined size must be 100 MB or smaller.";
+    }
+    return "";
+  }
+
+  function renderFileList() {
+    if (selectedFiles.length === 0) {
+      fileListEl.classList.add("hidden");
+      fileListEl.innerHTML = "";
+      return;
+    }
+    fileListEl.classList.remove("hidden");
+    fileListEl.innerHTML = "";
+    selectedFiles.forEach((f, i) => {
+      const li = document.createElement("li");
+      li.className = "flex items-center justify-between gap-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2";
+      const left = document.createElement("div");
+      left.className = "min-w-0 flex items-center gap-2";
+      left.innerHTML =
+        '<span class="text-lg shrink-0">' + iconFor(f.name) + '</span>' +
+        '<span class="truncate text-sm font-medium text-slate-700"></span>';
+      left.querySelector("span.truncate").textContent = f.name;
+      const right = document.createElement("div");
+      right.className = "flex items-center gap-3 shrink-0";
+      const size = document.createElement("span");
+      size.className = "text-xs text-slate-400";
+      size.textContent = fmtBytes(f.size);
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "text-xs font-semibold text-red-500 hover:text-red-700";
+      rm.textContent = "Remove";
+      rm.addEventListener("click", () => {
+        selectedFiles.splice(i, 1);
+        afterFileChange();
+      });
+      right.appendChild(size);
+      right.appendChild(rm);
+      li.appendChild(left);
+      li.appendChild(right);
+      fileListEl.appendChild(li);
+    });
+  }
+
+  function iconFor(name) {
+    const ext = name.split(".").pop().toLowerCase();
+    if (ext === "pdf") return "📕";
+    if (ext === "docx") return "📘";
+    if (ext === "jpg" || ext === "jpeg") return "🖼️";
+    return "📄";
+  }
+
+  function updateCost() {
+    const pages = Math.max(1, parseInt(pagesEl.value, 10) || 0);
+    const copies = Math.max(1, parseInt(copiesEl.value, 10) || 0);
+    const color = colorEl.value;
+    const layout = layoutEl.value;
+    const rate = computeRatePerPage(color, layout);
+    const total = computeTotal(color, layout, pages, copies);
+    if (selectedFiles.length === 0) {
+      costBreakdown.textContent = "Add files to see the price.";
+    } else {
+      costBreakdown.textContent =
+        RUPEE + rate + "/page × " + pages + " page" + (pages > 1 ? "s" : "") +
+        " × " + copies + " cop" + (copies > 1 ? "ies" : "y") +
+        " · " + color + " · " + layout;
+    }
+    costTotal.textContent = RUPEE + total;
+  }
+
+  // Auto page-count from the first PDF (pdf.js). Manual input remains authoritative —
+  // we only overwrite if the user has not changed the field from the default.
+  async function tryAutoPageCount() {
+    const pdf = selectedFiles.find((f) => f.name.toLowerCase().endsWith(".pdf"));
+    if (!pdf) return;
+    // Only auto-fill while the field is untouched (still at default "1").
+    if (pagesEl.dataset.touched === "1") return;
+    try {
+      if (typeof pdfjsLib === "undefined") return;
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+      } catch (e) { /* worker optional */ }
+      const buf = await pdf.arrayBuffer();
+      const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+      if (doc && doc.numPages && pagesEl.dataset.touched !== "1") {
+        pagesEl.value = doc.numPages;
+        pagesHint.textContent = "Auto-detected " + doc.numPages + " page(s) from " + pdf.name + ". Edit if needed.";
+        updateCost();
+      }
+    } catch (err) {
+      // Silent fallback: manual entry is authoritative.
+      pagesHint.textContent = "Could not auto-read pages. Please enter the page count.";
+    }
+  }
+
+  function afterFileChange() {
+    renderFileList();
+    const err = validateSizes();
+    if (err) showAlert(sizeAlert, err); else hideAlert(sizeAlert);
+    updateCost();
+    tryAutoPageCount();
+  }
+
+  function acceptIncoming(fileListLike) {
+    const allowed = ["pdf", "docx", "jpg", "jpeg"];
+    const incoming = Array.from(fileListLike).filter((f) => {
+      const ext = f.name.split(".").pop().toLowerCase();
+      return allowed.includes(ext);
+    });
+    if (incoming.length === 0) return;
+    selectedFiles = selectedFiles.concat(incoming);
+    afterFileChange();
+  }
+
+  /* ============================ Wiring: file input + drop zone ============================ */
+  dropZone.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", (e) => {
+    acceptIncoming(e.target.files);
+    fileInput.value = ""; // allow re-selecting the same file
+  });
+  ["dragenter", "dragover"].forEach((ev) =>
+    dropZone.addEventListener(ev, (e) => { e.preventDefault(); dropZone.classList.add("drop-active"); }));
+  ["dragleave", "drop"].forEach((ev) =>
+    dropZone.addEventListener(ev, (e) => { e.preventDefault(); dropZone.classList.remove("drop-active"); }));
+  dropZone.addEventListener("drop", (e) => {
+    if (e.dataTransfer && e.dataTransfer.files) acceptIncoming(e.dataTransfer.files);
+  });
+
+  /* ============================ Wiring: spec inputs ============================ */
+  pagesEl.addEventListener("input", () => { pagesEl.dataset.touched = "1"; updateCost(); });
+  copiesEl.addEventListener("input", updateCost);
+  layoutEl.addEventListener("change", updateCost);
+  colorEl.addEventListener("change", updateCost);
+  updateCost();
+
+  /* ============================ Tracking UI ============================ */
+  const STEP_KEYS = ["reserve", "upload", "finalize"];
+  function buildSteps() {
+    trackSteps.innerHTML = "";
+    const labels = {
+      reserve: "Reserve token number",
+      upload: "Upload files to print warehouse",
+      finalize: "Place order in shop queue"
+    };
+    STEP_KEYS.forEach((k) => {
+      const li = document.createElement("li");
+      li.id = "step-" + k;
+      li.className = "flex items-center gap-2 text-slate-400";
+      li.innerHTML = '<span class="step-icon">○</span><span>' + labels[k] + '</span>';
+      trackSteps.appendChild(li);
+    });
+  }
+  function setStep(key, state) {
+    const li = $("step-" + key);
+    if (!li) return;
+    const icon = li.querySelector(".step-icon");
+    if (state === "active") {
+      li.className = "flex items-center gap-2 text-blue-600 font-medium";
+      icon.textContent = "◐";
+    } else if (state === "done") {
+      li.className = "flex items-center gap-2 text-emerald-600";
+      icon.textContent = "✔";
+    } else if (state === "error") {
+      li.className = "flex items-center gap-2 text-red-600 font-medium";
+      icon.textContent = "✖";
+    }
+  }
+  function setProgress(pct, label) {
+    trackBar.style.width = Math.max(0, Math.min(100, pct)) + "%";
+    trackPct.textContent = Math.round(pct) + "%";
+    if (label) trackLabel.textContent = label;
+  }
+
+  /* ============================ Upload one file to GAS ============================ */
+  function readBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result || "";
+        const comma = result.indexOf(",");
+        // Strip the "data:<mime>;base64," prefix per contract.
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = () => reject(new Error("Could not read " + file.name));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadToGAS(file, tokenNumber) {
+    const fileBase64 = await readBase64(file);
+    const payload = {
+      fileName: file.name,
+      tokenNumber: tokenNumber,
+      fileBase64: fileBase64,
+      isCatalogItem: false,
+      mimeType: file.type || ""
+    };
+    // CORS-critical: text/plain dodges preflight; redirect:follow is required for script.google.com 302.
+    const res = await fetch(GAS_WEB_APP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+      redirect: "follow"
+    });
+    let data;
+    try { data = await res.json(); }
+    catch (e) { throw new Error("Drive upload returned an unreadable response for " + file.name); }
+    if (!data || data.success !== true || !data.webViewLink) {
+      throw new Error((data && data.error) ? data.error : "Drive upload failed for " + file.name);
+    }
+    return { name: file.name, sizeBytes: file.size, url: data.webViewLink };
+  }
+
+  /* ============================ Submit flow ============================ */
+  submitBtn.addEventListener("click", onSubmit);
+
+  function preflightValidate() {
+    hideAlert(formError);
+    const sid = studentIdEl.value.trim();
+    if (!sid) return "Please enter your Name / Roll Number.";
+    if (selectedFiles.length === 0) return "Please add at least one file (PDF, DOCX, JPG or JPEG).";
+    const sizeErr = validateSizes();
+    if (sizeErr) return sizeErr;
+    const pages = parseInt(pagesEl.value, 10);
+    if (!pages || pages < 1) return "Pages per copy must be at least 1.";
+    const copies = parseInt(copiesEl.value, 10);
+    if (!copies || copies < 1) return "Copies must be at least 1.";
+    if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL === "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL") {
+      return "Upload service is not configured yet (GAS_WEB_APP_URL). Please tell the shop operator.";
+    }
+    return "";
+  }
+
+  async function onSubmit() {
+    const err = preflightValidate();
+    if (err) { showAlert(formError, err); return; }
+
+    // Lock the form and reveal the tracker.
+    const sid = studentIdEl.value.trim();
+    const pages = Math.max(1, parseInt(pagesEl.value, 10));
+    const copies = Math.max(1, parseInt(copiesEl.value, 10));
+    const color = colorEl.value;
+    const layout = layoutEl.value;
+    const price = computeTotal(color, layout, pages, copies);
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Working…";
+    hideAlert(stepError);
+    successBadge.classList.add("hidden");
+    formCard.classList.add("opacity-50", "pointer-events-none");
+    resultCard.classList.remove("hidden");
+    tokenBig.textContent = "#---";
+    buildSteps();
+    setProgress(5, "Reserving token…");
+    resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    let tokenId;
+    /* ---- Step 1: reserve a token ---- */
+    try {
+      setStep("reserve", "active");
+      const res = await fetch("/api/tokens", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !data.token_id) {
+        throw new Error(data.error || ("Could not reserve a token (HTTP " + res.status + ")."));
+      }
+      tokenId = data.token_id;
+      tokenBig.textContent = "#" + tokenId;
+      setStep("reserve", "done");
+      setProgress(20, "Token #" + tokenId + " reserved");
+    } catch (e) {
+      setStep("reserve", "error");
+      failStep("Could not reserve a token. " + e.message);
+      return;
+    }
+
+    /* ---- Step 2: upload each file to Drive via GAS ---- */
+    let uploaded = [];
+    try {
+      setStep("upload", "active");
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const f = selectedFiles[i];
+        setProgress(20 + (60 * i) / selectedFiles.length,
+          "Uploading " + (i + 1) + " of " + selectedFiles.length + ": " + f.name);
+        const info = await uploadToGAS(f, tokenId);
+        uploaded.push(info);
+      }
+      setStep("upload", "done");
+      setProgress(80, "All files uploaded");
+    } catch (e) {
+      setStep("upload", "error");
+      failStep("File upload failed. " + e.message);
+      return;
+    }
+
+    /* ---- Step 3: finalize the order ---- */
+    try {
+      setStep("finalize", "active");
+      setProgress(88, "Placing order in shop queue…");
+
+      const totalSizeBytes = uploaded.reduce((s, u) => s + u.sizeBytes, 0);
+      const displayName = uploaded.length === 1 ? uploaded[0].name : (uploaded.length + " files");
+      const print_specifications = {
+        fileName: displayName,
+        fileCount: uploaded.length,
+        totalSizeBytes: totalSizeBytes,
+        pages: pages,
+        copies: copies,
+        color: color,
+        layout: layout,
+        files: uploaded
+      };
+
+      const body = {
+        token_id: tokenId,
+        student_id: sid,
+        drive_viewer_url: uploaded[0].url,
+        print_specifications: print_specifications,
+        calculated_price: price
+      };
+
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || ("Could not place order (HTTP " + res.status + ")."));
+      }
+      setStep("finalize", "done");
+      setProgress(100, "Done");
+    } catch (e) {
+      setStep("finalize", "error");
+      failStep("Could not place your order. " + e.message + " (Your token is #" + tokenId + " — show this if the file already uploaded.)");
+      return;
+    }
+
+    /* ---- Success ---- */
+    trackLabel.textContent = "Complete";
+    successToken.textContent = "#" + tokenId;
+    successCash.textContent = "Pay " + RUPEE + price + " in cash when you collect.";
+    successBadge.classList.remove("hidden");
+    submitBtn.textContent = "Generate Print Token";
+    successBadge.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function failStep(msg) {
+    showAlert(stepError, msg);
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Generate Print Token";
+    formCard.classList.remove("opacity-50", "pointer-events-none");
+  }
+
+  /* ============================ New order reset ============================ */
+  newOrderBtn.addEventListener("click", () => {
+    selectedFiles = [];
+    studentIdEl.value = "";
+    pagesEl.value = "1";
+    delete pagesEl.dataset.touched;
+    pagesHint.textContent = "Auto-filled from PDF; edit if needed.";
+    copiesEl.value = "1";
+    layoutEl.value = "Single Sided";
+    colorEl.value = "B&W";
+    hideAlert(sizeAlert);
+    hideAlert(formError);
+    hideAlert(stepError);
+    renderFileList();
+    updateCost();
+    resultCard.classList.add("hidden");
+    successBadge.classList.add("hidden");
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Generate Print Token";
+    formCard.classList.remove("opacity-50", "pointer-events-none");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+  </script>
+</body>
+</html>

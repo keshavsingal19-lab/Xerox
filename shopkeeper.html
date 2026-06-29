@@ -1,0 +1,524 @@
+<!-- Shopkeeper Switchboard Dashboard (VIEW B) -->
+<!-- Self-contained Tailwind (Play CDN) desktop-optimized page. -->
+<!-- Talks SAME-ORIGIN to /api/orders (Cloudflare Pages Functions + D1). -->
+<script src="https://cdn.tailwindcss.com"></script>
+<title>Campus Xerox - Shopkeeper Switchboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<div class="min-h-screen bg-slate-900 text-slate-100 font-sans antialiased">
+  <div class="mx-auto max-w-5xl px-6 py-8">
+
+    <!-- Header -->
+    <header class="mb-8 flex items-center justify-between border-b border-slate-700 pb-5">
+      <div>
+        <h1 class="text-3xl font-black tracking-tight text-white">Campus Xerox</h1>
+        <p class="text-sm font-medium text-slate-400">Shopkeeper Switchboard &mdash; clear a token to print</p>
+      </div>
+      <div id="connBadge" class="rounded-full bg-slate-700 px-4 py-2 text-xs font-bold uppercase tracking-widest text-slate-300">
+        Ready
+      </div>
+    </header>
+
+    <div class="grid grid-cols-1 gap-8 lg:grid-cols-[360px_1fr]">
+
+      <!-- ============ LEFT: TOKEN PAD ============ -->
+      <section class="rounded-2xl bg-slate-800 p-6 shadow-2xl ring-1 ring-slate-700">
+        <label class="mb-2 block text-center text-sm font-bold uppercase tracking-widest text-slate-400">
+          Enter Token
+        </label>
+
+        <!-- Big token display -->
+        <div id="tokenDisplay"
+             class="mb-5 flex h-28 items-center justify-center rounded-xl bg-slate-900 font-mono text-7xl font-black tracking-[0.25em] text-emerald-400 ring-2 ring-slate-700">
+          <span id="tokenText" class="text-slate-600">---</span>
+        </div>
+
+        <!-- Number pad -->
+        <div class="grid grid-cols-3 gap-3" id="numpad">
+          <!-- digit buttons injected by JS -->
+        </div>
+
+        <button id="lookupBtn"
+                class="mt-4 w-full rounded-xl bg-sky-600 py-4 text-lg font-extrabold uppercase tracking-wide text-white transition hover:bg-sky-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40">
+          Look Up Token
+        </button>
+
+        <p class="mt-4 text-center text-xs leading-relaxed text-slate-500">
+          Auto-searches when the 3rd digit is typed.<br />
+          Use your keyboard digits, Enter, or Backspace too.
+        </p>
+      </section>
+
+      <!-- ============ RIGHT: RESULT PANEL ============ -->
+      <section class="min-h-[24rem]">
+
+        <!-- IDLE state -->
+        <div id="idleState"
+             class="flex h-full min-h-[24rem] flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-700 text-center text-slate-500">
+          <svg class="mb-4 h-16 w-16 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <p class="text-lg font-semibold">Awaiting a token</p>
+          <p class="text-sm">Type a 3-digit token on the pad to pull up the order.</p>
+        </div>
+
+        <!-- LOADING state -->
+        <div id="loadingState"
+             class="hidden h-full min-h-[24rem] flex-col items-center justify-center rounded-2xl bg-slate-800 text-center ring-1 ring-slate-700">
+          <svg class="mb-4 h-12 w-12 animate-spin text-sky-400" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          <p class="text-lg font-semibold text-slate-300">Fetching order&hellip;</p>
+        </div>
+
+        <!-- ERROR state -->
+        <div id="errorState"
+             class="hidden h-full min-h-[24rem] flex-col items-center justify-center rounded-2xl bg-red-950 text-center ring-2 ring-red-600">
+          <svg class="mb-4 h-16 w-16 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+          </svg>
+          <p class="px-6 text-2xl font-black text-red-200" id="errorMsg">Something went wrong</p>
+          <p class="mt-2 text-sm text-red-300/70">Check the number and try again.</p>
+        </div>
+
+        <!-- SUCCESS / CLEARANCE CARD -->
+        <div id="orderCard"
+             class="hidden overflow-hidden rounded-2xl bg-white text-slate-900 shadow-2xl ring-1 ring-slate-300">
+
+          <!-- Card header -->
+          <div class="flex items-center justify-between bg-slate-900 px-6 py-4 text-white">
+            <div>
+              <p class="text-xs font-bold uppercase tracking-widest text-slate-400">Token</p>
+              <p id="cardToken" class="font-mono text-5xl font-black leading-none text-emerald-400">---</p>
+            </div>
+            <div class="text-right">
+              <p class="text-xs font-bold uppercase tracking-widest text-slate-400">Student ID</p>
+              <p id="cardStudent" class="text-xl font-bold text-white">&mdash;</p>
+            </div>
+          </div>
+
+          <!-- Already-printed warning ribbon (hidden unless re-cleared) -->
+          <div id="printedRibbon" class="hidden bg-amber-400 px-6 py-2 text-center text-sm font-black uppercase tracking-widest text-amber-950">
+            Already cleared &mdash; archived
+          </div>
+
+          <div class="px-6 py-5">
+
+            <!-- File summary -->
+            <div class="mb-5">
+              <p class="text-xs font-bold uppercase tracking-widest text-slate-500">File(s)</p>
+              <p id="cardFileName" class="break-words text-2xl font-extrabold text-slate-900">&mdash;</p>
+              <p id="cardFileMeta" class="text-sm font-medium text-slate-500">&mdash;</p>
+
+              <!-- Multi-file list -->
+              <ul id="cardFileList" class="mt-3 hidden divide-y divide-slate-200 rounded-lg border border-slate-200">
+                <!-- injected -->
+              </ul>
+            </div>
+
+            <!-- Spec grid -->
+            <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div class="rounded-lg bg-slate-100 p-3 text-center">
+                <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Color</p>
+                <p id="specColor" class="text-lg font-black text-slate-900">&mdash;</p>
+              </div>
+              <div class="rounded-lg bg-slate-100 p-3 text-center">
+                <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Layout</p>
+                <p id="specLayout" class="text-lg font-black text-slate-900">&mdash;</p>
+              </div>
+              <div class="rounded-lg bg-slate-100 p-3 text-center">
+                <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Pages</p>
+                <p id="specPages" class="text-lg font-black text-slate-900">&mdash;</p>
+              </div>
+              <div class="rounded-lg bg-slate-100 p-3 text-center">
+                <p class="text-xs font-bold uppercase tracking-wider text-slate-500">Copies</p>
+                <p id="specCopies" class="text-lg font-black text-slate-900">&mdash;</p>
+              </div>
+            </div>
+
+            <!-- TOTAL banner -->
+            <div class="mb-6 rounded-xl bg-emerald-600 px-6 py-5 text-center text-white shadow-lg">
+              <p class="text-sm font-bold uppercase tracking-[0.3em] text-emerald-100">Total Amount Due</p>
+              <p id="cardTotal" class="font-mono text-6xl font-black leading-none">&mdash;</p>
+            </div>
+
+            <!-- Unlock & print -->
+            <button id="unlockBtn"
+                    class="w-full rounded-xl bg-green-600 py-5 text-2xl font-black uppercase tracking-widest text-white shadow-lg transition hover:bg-green-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-slate-400">
+              Unlock &amp; Print
+            </button>
+            <p id="unlockHint" class="mt-3 text-center text-xs font-medium text-slate-500">
+              Opens every file in a new tab &mdash; then just Ctrl+P each one.
+            </p>
+          </div>
+        </div>
+
+      </section>
+    </div>
+
+    <footer class="mt-10 text-center text-xs text-slate-600">
+      Campus Xerox Token &amp; Print &bull; Shopkeeper Console
+    </footer>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ===== State =====
+  var RUPEE = String.fromCharCode(8377);
+  var currentDigits = "";        // up to 3 chars
+  var currentOrder = null;       // last successfully fetched order object
+  var busy = false;              // request in flight
+
+  // ===== Elements =====
+  var tokenText   = document.getElementById("tokenText");
+  var numpad      = document.getElementById("numpad");
+  var lookupBtn   = document.getElementById("lookupBtn");
+  var connBadge   = document.getElementById("connBadge");
+
+  var idleState    = document.getElementById("idleState");
+  var loadingState = document.getElementById("loadingState");
+  var errorState   = document.getElementById("errorState");
+  var orderCard    = document.getElementById("orderCard");
+  var errorMsg     = document.getElementById("errorMsg");
+
+  var cardToken    = document.getElementById("cardToken");
+  var cardStudent  = document.getElementById("cardStudent");
+  var cardFileName = document.getElementById("cardFileName");
+  var cardFileMeta = document.getElementById("cardFileMeta");
+  var cardFileList = document.getElementById("cardFileList");
+  var specColor    = document.getElementById("specColor");
+  var specLayout   = document.getElementById("specLayout");
+  var specPages    = document.getElementById("specPages");
+  var specCopies   = document.getElementById("specCopies");
+  var cardTotal    = document.getElementById("cardTotal");
+  var unlockBtn    = document.getElementById("unlockBtn");
+  var unlockHint   = document.getElementById("unlockHint");
+  var printedRibbon = document.getElementById("printedRibbon");
+
+  // ===== Helpers =====
+  function setBadge(text, classes) {
+    connBadge.textContent = text;
+    connBadge.className = "rounded-full px-4 py-2 text-xs font-bold uppercase tracking-widest " + classes;
+  }
+
+  function formatBytes(bytes) {
+    var n = Number(bytes);
+    if (!isFinite(n) || n <= 0) return "Unknown size";
+    var units = ["B", "KB", "MB", "GB", "TB"];
+    var i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    var rounded = (i === 0) ? Math.round(n) : Math.round(n * 10) / 10;
+    return rounded + " " + units[i];
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function show(which) {
+    idleState.classList.add("hidden");    idleState.classList.remove("flex");
+    loadingState.classList.add("hidden"); loadingState.classList.remove("flex");
+    errorState.classList.add("hidden");   errorState.classList.remove("flex");
+    orderCard.classList.add("hidden");
+
+    if (which === "idle")    { idleState.classList.remove("hidden");    idleState.classList.add("flex"); }
+    if (which === "loading") { loadingState.classList.remove("hidden"); loadingState.classList.add("flex"); }
+    if (which === "error")   { errorState.classList.remove("hidden");   errorState.classList.add("flex"); }
+    if (which === "order")   { orderCard.classList.remove("hidden"); }
+  }
+
+  function updateTokenDisplay() {
+    if (currentDigits.length === 0) {
+      tokenText.textContent = "---";
+      tokenText.className = "text-slate-600";
+    } else {
+      tokenText.textContent = currentDigits.padEnd(3, "_");
+      tokenText.className = "text-emerald-400";
+    }
+    lookupBtn.disabled = currentDigits.length !== 3 || busy;
+  }
+
+  // ===== Numpad build =====
+  function makeBtn(label, opts) {
+    opts = opts || {};
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    var base = "rounded-xl py-5 text-3xl font-black transition active:scale-95 select-none ";
+    b.className = base + (opts.classes || "bg-slate-700 text-white hover:bg-slate-600");
+    b.addEventListener("click", opts.onClick);
+    return b;
+  }
+
+  function pressDigit(d) {
+    if (busy) return;
+    if (currentDigits.length >= 3) {
+      // start a fresh token on the next digit after 3 are present
+      currentDigits = "";
+    }
+    currentDigits += d;
+    updateTokenDisplay();
+    if (currentDigits.length === 3) {
+      lookup();
+    }
+  }
+
+  function pressBackspace() {
+    if (busy) return;
+    currentDigits = currentDigits.slice(0, -1);
+    updateTokenDisplay();
+  }
+
+  function pressClear() {
+    if (busy) return;
+    currentDigits = "";
+    currentOrder = null;
+    updateTokenDisplay();
+    show("idle");
+  }
+
+  function buildPad() {
+    // Rows: 1 2 3 / 4 5 6 / 7 8 9 / CLEAR 0 BACK
+    ["1","2","3","4","5","6","7","8","9"].forEach(function (d) {
+      numpad.appendChild(makeBtn(d, { onClick: function () { pressDigit(d); } }));
+    });
+    numpad.appendChild(makeBtn("Clear", {
+      classes: "bg-red-700 text-white hover:bg-red-600 text-xl",
+      onClick: pressClear
+    }));
+    numpad.appendChild(makeBtn("0", { onClick: function () { pressDigit("0"); } }));
+    numpad.appendChild(makeBtn("⌫", {
+      classes: "bg-amber-600 text-white hover:bg-amber-500",
+      onClick: pressBackspace
+    }));
+  }
+
+  // ===== API: GET /api/orders =====
+  function lookup() {
+    if (currentDigits.length !== 3) return;
+    var token = currentDigits;
+    var tokenNum = parseInt(token, 10);
+    if (!(tokenNum >= 100 && tokenNum <= 999)) {
+      // Out-of-range (e.g. a leading zero like "012"): never hits the server.
+      currentOrder = null;
+      errorMsg.textContent = "Token must be a number between 100 and 999.";
+      show("error");
+      setBadge("Invalid", "bg-red-600 text-white");
+      return;
+    }
+    busy = true;
+    updateTokenDisplay();
+    setBadge("Searching", "bg-sky-600 text-white");
+    show("loading");
+
+    fetch("/api/orders?token_id=" + encodeURIComponent(token), {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    })
+    .then(function (res) {
+      return res.json().then(function (data) {
+        return { status: res.status, data: data };
+      });
+    })
+    .then(function (r) {
+      busy = false;
+      updateTokenDisplay();
+      if (r.data && r.data.success && r.data.order) {
+        currentOrder = r.data.order;
+        renderOrder(r.data.order);
+        setBadge("Found", "bg-emerald-600 text-white");
+      } else {
+        currentOrder = null;
+        var msg = (r.data && r.data.error) ? r.data.error : ("Lookup failed (" + r.status + ")");
+        errorMsg.textContent = msg;
+        show("error");
+        setBadge("Not Found", "bg-red-600 text-white");
+      }
+    })
+    .catch(function (err) {
+      busy = false;
+      updateTokenDisplay();
+      currentOrder = null;
+      errorMsg.textContent = "Network error: " + (err && err.message ? err.message : "could not reach server");
+      show("error");
+      setBadge("Offline", "bg-red-600 text-white");
+    });
+  }
+
+  // ===== Render the clearance card =====
+  function renderOrder(order) {
+    var specs = order.print_specifications || {};
+    // print_specifications may arrive as a parsed object per contract; defensively parse if string.
+    if (typeof specs === "string") {
+      try { specs = JSON.parse(specs); } catch (e) { specs = {}; }
+    }
+
+    var files = Array.isArray(specs.files) ? specs.files : [];
+    var fileCount = (typeof specs.fileCount === "number") ? specs.fileCount : files.length;
+
+    cardToken.textContent = order.token_id;
+    cardStudent.textContent = order.student_id || "(none)";
+
+    // File name + meta
+    var primaryName = specs.fileName ||
+      (files.length ? files[0].name : null) ||
+      ((fileCount > 1) ? (fileCount + " files") : "Untitled file");
+    cardFileName.textContent = primaryName;
+
+    var metaParts = [];
+    if (fileCount > 1) metaParts.push(fileCount + " files");
+    metaParts.push(formatBytes(specs.totalSizeBytes));
+    cardFileMeta.textContent = metaParts.join("  ·  ");
+
+    // Multi-file list
+    cardFileList.innerHTML = "";
+    if (files.length > 1) {
+      files.forEach(function (f, idx) {
+        var li = document.createElement("li");
+        li.className = "flex items-center justify-between gap-3 px-4 py-2 text-sm";
+        li.innerHTML =
+          '<span class="flex min-w-0 items-center gap-2">' +
+            '<span class="inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white">' + (idx + 1) + '</span>' +
+            '<span class="truncate font-semibold text-slate-800">' + escapeHtml(f.name || ("File " + (idx + 1))) + '</span>' +
+          '</span>' +
+          '<span class="flex-none font-mono text-xs text-slate-500">' + escapeHtml(formatBytes(f.sizeBytes)) + '</span>';
+        cardFileList.appendChild(li);
+      });
+      cardFileList.classList.remove("hidden");
+    } else {
+      cardFileList.classList.add("hidden");
+    }
+
+    // Specs
+    specColor.textContent  = specs.color  || "—";
+    specLayout.textContent = specs.layout || "—";
+    specPages.textContent  = (typeof specs.pages === "number") ? specs.pages : (specs.pages || "—");
+    specCopies.textContent = (typeof specs.copies === "number") ? specs.copies : (specs.copies || "—");
+
+    // Total
+    var price = Number(order.calculated_price);
+    cardTotal.textContent = RUPEE + " " + (isFinite(price) ? price : 0);
+
+    // Reset button state for a fresh fetch
+    if (Number(order.is_printed) === 1) {
+      // Defensive: backend normally 404s on printed tokens, but guard anyway.
+      printedRibbon.classList.remove("hidden");
+      setCleared();
+    } else {
+      printedRibbon.classList.add("hidden");
+      unlockBtn.disabled = false;
+      unlockBtn.textContent = "Unlock & Print";
+      unlockBtn.className = "w-full rounded-xl bg-green-600 py-5 text-2xl font-black uppercase tracking-widest text-white shadow-lg transition hover:bg-green-500 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-slate-400";
+      unlockHint.textContent = "Opens every file in a new tab — then just Ctrl+P each one.";
+      unlockHint.className = "mt-3 text-center text-xs font-medium text-slate-500";
+    }
+
+    show("order");
+  }
+
+  function setCleared() {
+    unlockBtn.disabled = true;
+    unlockBtn.textContent = "Cleared ✓";
+    unlockBtn.className = "w-full rounded-xl bg-slate-400 py-5 text-2xl font-black uppercase tracking-widest text-white shadow-lg";
+    printedRibbon.classList.remove("hidden");
+    printedRibbon.textContent = "Cleared — archived";
+  }
+
+  // ===== Open files for printing =====
+  function openFilesForPrint(order) {
+    var specs = order.print_specifications || {};
+    if (typeof specs === "string") {
+      try { specs = JSON.parse(specs); } catch (e) { specs = {}; }
+    }
+    var files = Array.isArray(specs.files) ? specs.files : [];
+    var urls = [];
+    files.forEach(function (f) { if (f && f.url) urls.push(f.url); });
+    if (urls.length === 0 && order.drive_viewer_url) urls.push(order.drive_viewer_url);
+
+    urls.forEach(function (u) {
+      window.open(u, "_blank", "noopener");
+    });
+  }
+
+  // ===== API: PATCH /api/orders (Unlock & Print) =====
+  function unlockAndPrint() {
+    if (!currentOrder || busy) return;
+    var order = currentOrder;
+    var token = order.token_id;
+
+    busy = true;
+    unlockBtn.disabled = true;
+    unlockBtn.textContent = "Unlocking…";
+    setBadge("Clearing", "bg-sky-600 text-white");
+
+    fetch("/api/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ token_id: token })
+    })
+    .then(function (res) {
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
+    })
+    .then(function (r) {
+      busy = false;
+      if (r.data && r.data.success) {
+        // Open the files first so the popup is tied to the user click context window,
+        // then lock down the card.
+        openFilesForPrint(order);
+        setCleared();
+        unlockHint.textContent = "Sent to print. If a tab was blocked, allow pop-ups and re-open from the order.";
+        unlockHint.className = "mt-3 text-center text-xs font-semibold text-green-700";
+        setBadge("Cleared", "bg-emerald-600 text-white");
+      } else {
+        var msg = (r.data && r.data.error) ? r.data.error : ("Could not clear token (" + r.status + ")");
+        unlockBtn.disabled = false;
+        unlockBtn.textContent = "Unlock & Print";
+        unlockHint.textContent = msg;
+        unlockHint.className = "mt-3 text-center text-xs font-bold text-red-600";
+        setBadge("Error", "bg-red-600 text-white");
+      }
+    })
+    .catch(function (err) {
+      busy = false;
+      unlockBtn.disabled = false;
+      unlockBtn.textContent = "Unlock & Print";
+      unlockHint.textContent = "Network error: " + (err && err.message ? err.message : "could not reach server");
+      unlockHint.className = "mt-3 text-center text-xs font-bold text-red-600";
+      setBadge("Offline", "bg-red-600 text-white");
+    });
+  }
+
+  // ===== Wire up =====
+  buildPad();
+  updateTokenDisplay();
+  show("idle");
+
+  lookupBtn.addEventListener("click", lookup);
+  unlockBtn.addEventListener("click", unlockAndPrint);
+
+  // Physical keyboard support
+  document.addEventListener("keydown", function (e) {
+    if (e.key >= "0" && e.key <= "9") {
+      pressDigit(e.key);
+      e.preventDefault();
+    } else if (e.key === "Backspace") {
+      pressBackspace();
+      e.preventDefault();
+    } else if (e.key === "Enter") {
+      if (currentDigits.length === 3) lookup();
+      e.preventDefault();
+    } else if (e.key === "Escape" || (e.key && e.key.toLowerCase() === "c" && !e.ctrlKey && !e.metaKey)) {
+      pressClear();
+    }
+  });
+})();
+</script>

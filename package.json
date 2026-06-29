@@ -1,0 +1,13 @@
+{
+  "name": "campus-xerox",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev .",
+    "deploy": "wrangler pages deploy .",
+    "db:init": "wrangler d1 execute xerox_db --file=./schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "wrangler": "^3.78.0"
+  }
+}
