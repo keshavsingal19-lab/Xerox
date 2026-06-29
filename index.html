@@ -145,8 +145,9 @@
 
   <script>
   /* ============================ CONFIG ============================ */
-  // PASTE the deployed Google Apps Script Web App URL here (ends with /exec).
-  const GAS_WEB_APP_URL = "https://script.google.com/macros/u/5/s/AKfycbz0IxcKOyFLD-o-WPKbq-qvLAmgJJSB1aFgVJf159icd9-NyFPjkSDnhk2ntsPm7Zdu/exec";
+  // Uploads are proxied through the same-origin /api/upload Pages Function, which
+  // forwards to Apps Script server-to-server (no browser CORS, no account redirect).
+  // The Apps Script /exec URL lives in functions/api/upload.ts — set it there.
 
   /* ============================ PRICING (contract) ============================ */
   // ratePerPage = Color ? 5 : 2; if Double Sided ratePerPage += 1; total = rate * pages * copies.
@@ -421,12 +422,11 @@
       isCatalogItem: false,
       mimeType: file.type || ""
     };
-    // CORS-critical: text/plain dodges preflight; redirect:follow is required for script.google.com 302.
-    const res = await fetch(GAS_WEB_APP_URL, {
+    // Same-origin proxy: /api/upload forwards to Apps Script server-side (no CORS).
+    const res = await fetch("/api/upload", {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload),
-      redirect: "follow"
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
     });
     let data;
     try { data = await res.json(); }
@@ -451,9 +451,6 @@
     if (!pages || pages < 1) return "Pages per copy must be at least 1.";
     const copies = parseInt(copiesEl.value, 10);
     if (!copies || copies < 1) return "Copies must be at least 1.";
-    if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL === "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL") {
-      return "Upload service is not configured yet (GAS_WEB_APP_URL). Please tell the shop operator.";
-    }
     return "";
   }
 
