@@ -2,11 +2,25 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Campus Xerox — Print Token</title>
   <link rel="stylesheet" href="/assets/app.css" />
   <style>
-    /* Minimal page-specific tweaks (drop zone + spinning step icon). No frameworks, no CDNs. */
+    /* =====================================================================
+       Page-local styles ONLY for brand-new widgets:
+         - drop zone
+         - per-document config rows
+         - upload metrics (transferred / ETA)
+         - tic-tac-toe grid
+         - mobile responsive tweaks
+       Everything else reuses /assets/app.css.
+       ===================================================================== */
+
+    /* The progress width is driven every animation frame by JS; disable the
+       app.css 0.35s width transition here so the eased bar stays in sync. */
+    #trackBar { transition: none; }
+
+    /* ---- Drop zone ---- */
     .dropzone {
       cursor: pointer; border: 2px dashed var(--line-2); border-radius: 12px;
       padding: 30px 18px; text-align: center; background: #fff;
@@ -18,20 +32,98 @@
     .dropzone .dz-title { font-size: 14px; color: var(--ink-2); font-weight: 600; }
     .dropzone .dz-title b { color: var(--blue-700); }
     .dropzone .dz-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
-    .file-rm { background: none; border: none; cursor: pointer; color: var(--red); font-weight: 700; font-size: 12px; padding: 2px 4px; }
-    .file-rm:hover { text-decoration: underline; }
-    .steps li .ic.spin { display: inline-block; animation: spin .8s linear infinite; }
-    .track-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+
+    /* ---- Per-document config card (one per uploaded file) ---- */
+    .doc { border: 1px solid var(--line); border-radius: 12px; background: #fff; padding: 14px 16px; box-shadow: var(--shadow-sm); }
+    .doc + .doc { margin-top: 12px; }
+    .doc-head { display: flex; align-items: flex-start; gap: 12px; }
+    .doc-ic { width: 40px; height: 40px; flex: none; border-radius: 9px; background: var(--sky); color: var(--blue-700); display: grid; place-items: center; font-size: 18px; font-weight: 800; }
+    .doc-id { min-width: 0; flex: 1; }
+    .doc-name { font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .doc-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .doc-rm { background: none; border: none; cursor: pointer; color: var(--red); font-weight: 700; font-size: 12px; padding: 6px 8px; min-height: 32px; flex: none; }
+    .doc-rm:hover { text-decoration: underline; }
+
+    .doc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+    .doc-grid .field { margin-bottom: 0; }
+    .doc-grid .label { font-size: 11px; margin-bottom: 4px; }
+    .doc-grid .input, .doc-grid .select { padding: 9px 11px; font-size: 14px; }
+    .doc-grid .input[readonly] { background: var(--bg); color: var(--ink-2); cursor: not-allowed; }
+    .pages-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    .doc-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+    .doc-line .ds { font-size: 12px; color: var(--muted); }
+    .doc-line .dv { font-family: var(--mono); font-weight: 800; color: var(--ink); font-size: 16px; }
+
+    /* ---- Active tier chip ---- */
+    .tier-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 4px 10px; border-radius: 999px; background: var(--sky); color: var(--blue-700); }
+
+    /* ---- Upload metrics row ---- */
+    .up-metrics { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; }
+    .up-metric { display: flex; flex-direction: column; }
+    .up-metric .mk { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+    .up-metric .mv { font-family: var(--mono); font-weight: 800; color: var(--blue-700); font-size: 14px; }
+
+    /* ---- Tic-tac-toe (entertainment during the wait) ---- */
+    .ttt-wrap { margin-top: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); padding: 14px 16px; }
+    .ttt-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .ttt-title { font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+    .ttt-status { font-size: 13px; font-weight: 700; color: var(--ink-2); }
+    .ttt-board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 252px; margin: 0 auto; }
+    .ttt-cell {
+      aspect-ratio: 1 / 1; min-height: 64px; border: 1px solid var(--line-2); border-radius: 10px; background: #fff;
+      font-family: var(--mono); font-size: 34px; font-weight: 800; color: var(--ink);
+      display: grid; place-items: center; cursor: pointer; user-select: none;
+      transition: background .12s, transform .05s, border-color .12s;
+    }
+    .ttt-cell:hover:not(.taken) { background: var(--sky); border-color: var(--blue-600); }
+    .ttt-cell:active:not(.taken) { transform: scale(.96); }
+    .ttt-cell.taken { cursor: default; }
+    .ttt-cell.x { color: var(--blue-700); }
+    .ttt-cell.o { color: var(--amber); }
+    .ttt-cell.win { background: var(--green-50); border-color: #bfe6cd; }
+    .ttt-reset { background: none; border: none; cursor: pointer; color: var(--blue-700); font-weight: 700; font-size: 12px; padding: 4px 6px; }
+    .ttt-reset:hover { text-decoration: underline; }
+
+    /* ---- Tracking head ---- */
+    .track-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
     .track-head .lbl { font-size: 13px; font-weight: 700; color: var(--ink-2); }
     .track-head .meta { display: flex; align-items: center; gap: 8px; }
     .track-head .pct { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .steps li .ic.spin { display: inline-block; animation: spin .8s linear infinite; }
+
+    /* ---- Success badge ---- */
     .success-box { border: 2px solid #bfe6cd; background: var(--green-50); border-radius: 14px; padding: 24px; text-align: center; }
     .success-box .big { font-size: 36px; }
     .success-box .head { font-size: 18px; font-weight: 800; color: var(--green); margin-top: 6px; }
     .success-box .tok { display: inline-flex; align-items: baseline; gap: 10px; background: #fff; border: 1px solid #bfe6cd; border-radius: 12px; padding: 12px 20px; margin-top: 16px; box-shadow: var(--shadow-sm); }
     .success-box .tok .tl { font-size: 13px; font-weight: 700; color: var(--muted); }
     .success-box .tok .tn { font-family: var(--mono); font-size: 30px; font-weight: 800; color: var(--green-600); }
-    .is-locked { opacity: .5; pointer-events: none; }
+
+    /* ---- Expiry / instant-reuse notice ---- */
+    .expiry-note { display: flex; align-items: flex-start; gap: 10px; }
+    .expiry-note .en-ic { font-size: 18px; line-height: 1.3; flex: none; }
+    .expiry-note .en-txt { font-size: 13px; line-height: 1.45; }
+    .expiry-note .en-txt b { font-weight: 800; }
+
+    .is-locked { opacity: .55; pointer-events: none; }
+
+    /* ===================== MOBILE (#4) ===================== */
+    @media (max-width: 560px) {
+      .doc-grid { grid-template-columns: 1fr 1fr; }
+      .total-banner .amount { font-size: 34px !important; }
+      .token-hero .num { font-size: 60px; }
+      .doc-name { white-space: normal; word-break: break-word; }
+    }
+    @media (max-width: 380px) {
+      .ttt-cell { min-height: 56px; font-size: 28px; }
+    }
+    /* Large touch targets on phones for the spec controls + buttons */
+    @media (max-width: 560px) {
+      .input, .select { min-height: 44px; }
+      .btn { min-height: 44px; }
+      .doc-rm { min-height: 44px; }
+    }
   </style>
 </head>
 <body>
@@ -77,55 +169,40 @@
             <div id="dropZone" class="dropzone">
               <div class="dz-ic">📄</div>
               <div class="dz-title"><b>Click to browse</b> or drag &amp; drop</div>
-              <div class="dz-sub">Accepted: PDF, DOCX, JPG, JPEG · Multiple files allowed</div>
+              <div class="dz-sub">Accepted: PDF, DOCX, JPG, JPEG · Multiple files allowed · Each file has its own settings</div>
             </div>
             <input id="fileInput" type="file" accept=".pdf,.docx,.jpg,.jpeg" multiple class="hidden" />
           </div>
 
-          <!-- Selected file list -->
-          <div id="fileList" class="hidden" style="margin-bottom:16px;"></div>
-
           <!-- Validation alert -->
           <div id="sizeAlert" class="alert alert-error hidden" style="margin-bottom:16px;"></div>
 
-          <!-- Print spec grid -->
-          <div class="grid-2">
-            <div class="field" style="margin-bottom:0;">
-              <label class="label" for="pages">Pages (per copy)</label>
-              <input id="pages" type="number" min="1" step="1" value="1" class="input" />
-              <p id="pagesHint" class="hint">Enter the page count (default 1).</p>
-            </div>
-            <div class="field" style="margin-bottom:0;">
-              <label class="label" for="copies">Copies</label>
-              <input id="copies" type="number" min="1" step="1" value="1" class="input" />
-            </div>
-            <div class="field" style="margin-bottom:0;">
-              <label class="label" for="layout">Layout</label>
-              <select id="layout" class="select">
-                <option value="Single Sided">Single Sided</option>
-                <option value="Double Sided">Double Sided</option>
-              </select>
-            </div>
-            <div class="field" style="margin-bottom:0;">
-              <label class="label" for="color">Color</label>
-              <select id="color" class="select">
-                <option value="B&amp;W">B&amp;W</option>
-                <option value="Color">Color</option>
-              </select>
+          <!-- Per-document config list (one card per file) -->
+          <div id="docList" class="hidden" style="margin-bottom:18px;"></div>
+
+          <!-- Live order total / volume tier -->
+          <div class="total-banner" style="margin-top:6px;">
+            <div class="row between wrap" style="gap:12px;">
+              <div>
+                <div class="label">Cash Due At Counter</div>
+                <div id="costBreakdown" style="font-size:12px; color:rgba(255,255,255,.92); margin-top:6px;">Add files to see the price.</div>
+                <div id="tierLine" style="margin-top:10px;"></div>
+              </div>
+              <div id="costTotal" class="amount" style="font-size:40px;">&#8377;0</div>
             </div>
           </div>
 
-          <!-- Live cost -->
-          <div class="total-banner row between" style="margin-top:22px;">
-            <div>
-              <div class="label">Cash Due At Counter</div>
-              <div id="costBreakdown" style="font-size:12px; color:rgba(255,255,255,.9); margin-top:6px;">Add files to see the price.</div>
-            </div>
-            <div id="costTotal" class="amount" style="font-size:40px;">&#8377;0</div>
+          <!-- Auto-delete + instant reuse notice (#7) -->
+          <div class="alert alert-info expiry-note" style="margin-top:16px;">
+            <span class="en-ic">⏳</span>
+            <span class="en-txt">
+              <b>Files &amp; tokens are deleted automatically after 2 hours.</b>
+              Re-uploading a file that someone already submitted recently is <b>instant</b> — no waiting for the upload.
+            </span>
           </div>
 
           <!-- Submit -->
-          <button id="submitBtn" type="button" class="btn btn-primary btn-lg btn-block" style="margin-top:22px;">
+          <button id="submitBtn" type="button" class="btn btn-primary btn-lg btn-block" style="margin-top:18px;">
             Generate Print Token
           </button>
           <div id="formError" class="alert alert-error hidden" style="margin-top:16px;"></div>
@@ -146,12 +223,34 @@
             <div class="track-head">
               <span id="trackLabel" class="lbl">Reserving token…</span>
               <span class="meta">
-                <span id="trackTimer" class="timer-chip">0.0s</span>
                 <span id="trackPct" class="pct">0%</span>
               </span>
             </div>
             <div class="progress"><div id="trackBar" class="bar" style="width:0%;"></div></div>
+
+            <!-- Live transferred + ETA (replaces the elapsed stopwatch) -->
+            <div class="up-metrics">
+              <div class="up-metric">
+                <span class="mk">Data transferred</span>
+                <span id="trackData" class="mv">0.0 MB / 0.0 MB</span>
+              </div>
+              <div class="up-metric">
+                <span class="mk">Time remaining</span>
+                <span id="trackEta" class="mv">calculating…</span>
+              </div>
+            </div>
+
             <ul id="trackSteps" class="steps"></ul>
+          </div>
+
+          <!-- Tic-tac-toe (entertainment while waiting) -->
+          <div id="tttWrap" class="ttt-wrap">
+            <div class="ttt-top">
+              <span class="ttt-title">Tic-Tac-Toe · while you wait</span>
+              <button id="tttReset" type="button" class="ttt-reset">↻ New game</button>
+            </div>
+            <div id="tttBoard" class="ttt-board" aria-label="Tic-tac-toe board"></div>
+            <div id="tttStatus" class="ttt-status center" style="margin-top:10px;">You are X — tap a square.</div>
           </div>
 
           <!-- Per-step error -->
@@ -167,12 +266,13 @@
               <span id="successToken" class="tn">#---</span>
             </div>
             <p id="successCash" class="muted" style="font-size:13px; margin-top:14px;"></p>
+            <p class="muted" style="font-size:12px; margin-top:10px;">Files &amp; tokens auto-delete after 2 hours.</p>
             <button id="newOrderBtn" type="button" class="btn btn-ghost btn-sm" style="margin-top:18px;">Start a new print job</button>
           </div>
         </div>
       </section>
 
-      <div class="footer">100% free · cardless · auto-clears after 2 hours</div>
+      <div class="footer">100% free · cardless · auto-clears after 2 hours · identical re-uploads are instant</div>
     </div>
   </main>
 
@@ -204,55 +304,93 @@
   </div>
 
   <script>
-  /* ============================ CONFIG ============================ */
-  // Uploads are proxied through the same-origin /api/upload Pages Function, which
-  // forwards to Apps Script server-to-server (no browser CORS, no account redirect).
-  // The Apps Script /exec URL lives in functions/api/upload.ts — set it there.
-
-  /* ============================ PRICING (contract) ============================ */
-  // ratePerPage = Color ? 5 : 2; if Double Sided ratePerPage += 1; total = rate * pages * copies.
-  function computeRatePerPage(color, layout) {
-    let rate = (color === "Color") ? 5 : 2;
-    if (layout === "Double Sided") rate += 1;
-    return rate;
-  }
-  function computeTotal(color, layout, pages, copies) {
-    return computeRatePerPage(color, layout) * pages * copies;
-  }
+  "use strict";
+  /* ============================================================================
+     Campus Xerox — Student page.
+     Same-origin APIs only (Cloudflare Pages Functions + D1):
+       POST /api/tokens                  reserve a token (also purges expired rows)
+       POST /api/upload {check:true,...} RESOLVE  (instant reuse if a valid catalog row exists)
+       POST /api/upload {fileName,...}   UPLOAD   (real bytes via XHR, with SHA-256 hash)
+       POST /api/orders                  finalize order (print_specifications JSON)
+       GET  /api/pricing                 volume-tier pricing model
+       POST /api/login                   staff login
+     pdf.js is lazy-injected ONLY when a PDF is added (never blocks first paint).
+     ============================================================================ */
 
   const RUPEE = String.fromCharCode(8377); // ₹
+  const $ = (id) => document.getElementById(id);
 
-  /* ============================ Size limits (contract validation) ============================ */
+  /* ============================ Size limits (Rules A/B) ============================ */
   const SINGLE_MAX = 25 * 1024 * 1024;   // Rule A: 1 file > 25 MB -> reject
   const MULTI_MAX  = 100 * 1024 * 1024;  // Rule B: many files cumulative > 100 MB -> reject
 
-  /* ============================ State ============================ */
-  let selectedFiles = []; // Array<File>
+  /* ============================ Concurrency ============================ */
+  const UPLOAD_POOL = 3; // parallel uploads (#6)
+
+  /* ============================ Pricing model (volume tiers) ============================ */
+  // Mirrors functions/api/pricing.ts EXACTLY.
+  const RATE_KEYS = ["bw_single", "bw_double", "color_single", "color_double"];
+  let PRICING = {
+    currency: RUPEE,
+    tiers: [
+      { minPages: 1,  rates: { bw_single: 3,   bw_double: 3,   color_single: 10, color_double: 10 } },
+      { minPages: 5,  rates: { bw_single: 2,   bw_double: 2,   color_single: 8,  color_double: 8 } },
+      { minPages: 20, rates: { bw_single: 1.5, bw_double: 1.5, color_single: 6,  color_double: 6 } },
+    ],
+  };
+
+  // rate key = (color==="Color" ? "color" : "bw") + "_" + (layout==="Double Sided" ? "double" : "single")
+  function rateKeyFor(color, layout) {
+    return (color === "Color" ? "color" : "bw") + "_" + (layout === "Double Sided" ? "double" : "single");
+  }
+  // total printout units = sum over docs of pages*copies
+  function totalUnits() {
+    return selectedDocs.reduce((s, d) => s + (effPages(d) * effCopies(d)), 0);
+  }
+  // Selected tier = the tier with the LARGEST minPages that is <= total units.
+  function selectedTier(units) {
+    const tiers = (PRICING.tiers || []).slice().sort((a, b) => a.minPages - b.minPages);
+    let chosen = tiers[0];
+    for (const t of tiers) {
+      if (units >= t.minPages) chosen = t; else break;
+    }
+    return chosen || { minPages: 1, rates: { bw_single: 0, bw_double: 0, color_single: 0, color_double: 0 } };
+  }
+  // Round to <= 2 decimals; prefer whole rupees when integral.
+  function money(n) {
+    if (!isFinite(n)) n = 0;
+    const r = Math.round(n * 100) / 100;
+    return RUPEE + (Number.isInteger(r) ? String(r) : r.toFixed(2).replace(/\.?0+$/, ""));
+  }
+
+  /* ============================ Per-document state ============================ */
+  // Each entry: { id, file, pages, copies, color, layout, pagesLocked, detecting }
+  let selectedDocs = [];
+  let docSeq = 0;
+
+  const effPages  = (d) => Math.max(1, parseInt(d.pages, 10) || 0);
+  const effCopies = (d) => Math.max(1, parseInt(d.copies, 10) || 0);
 
   /* ============================ DOM refs ============================ */
-  const $ = (id) => document.getElementById(id);
-  const studentIdEl = $("studentId");
-  const dropZone    = $("dropZone");
-  const fileInput   = $("fileInput");
-  const fileListEl  = $("fileList");
-  const sizeAlert   = $("sizeAlert");
-  const pagesEl     = $("pages");
-  const pagesHint   = $("pagesHint");
-  const copiesEl    = $("copies");
-  const layoutEl    = $("layout");
-  const colorEl     = $("color");
+  const studentIdEl   = $("studentId");
+  const dropZone      = $("dropZone");
+  const fileInput     = $("fileInput");
+  const docListEl     = $("docList");
+  const sizeAlert     = $("sizeAlert");
   const costBreakdown = $("costBreakdown");
-  const costTotal   = $("costTotal");
-  const submitBtn   = $("submitBtn");
-  const formError   = $("formError");
+  const tierLine      = $("tierLine");
+  const costTotal     = $("costTotal");
+  const submitBtn     = $("submitBtn");
+  const formError     = $("formError");
 
   const formCard    = $("formCard");
   const resultCard  = $("resultCard");
   const tokenBig    = $("tokenBig");
   const trackLabel  = $("trackLabel");
-  const trackTimer  = $("trackTimer");
   const trackPct    = $("trackPct");
   const trackBar    = $("trackBar");
+  const trackData   = $("trackData");
+  const trackEta    = $("trackEta");
   const trackSteps  = $("trackSteps");
   const stepError   = $("stepError");
   const successBadge= $("successBadge");
@@ -266,107 +404,87 @@
     if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
     return (n / (1024 * 1024)).toFixed(1) + " MB";
   }
-
-  function showAlert(el, msg) {
-    el.textContent = msg;
-    el.classList.remove("hidden");
-  }
-  function hideAlert(el) {
-    el.textContent = "";
-    el.classList.add("hidden");
-  }
-
-  function totalBytes() {
-    return selectedFiles.reduce((s, f) => s + f.size, 0);
-  }
-
-  // Returns an error string if invalid, otherwise "".
-  function validateSizes() {
-    if (selectedFiles.length === 1 && selectedFiles[0].size > SINGLE_MAX) {
-      return "That file is " + fmtBytes(selectedFiles[0].size) + ". A single file must be 25 MB or smaller.";
-    }
-    if (selectedFiles.length > 1 && totalBytes() > MULTI_MAX) {
-      return "Your files total " + fmtBytes(totalBytes()) + ". When uploading multiple files the combined size must be 100 MB or smaller.";
-    }
-    return "";
-  }
-
-  function renderFileList() {
-    if (selectedFiles.length === 0) {
-      fileListEl.classList.add("hidden");
-      fileListEl.innerHTML = "";
-      return;
-    }
-    fileListEl.classList.remove("hidden");
-    fileListEl.innerHTML = "";
-    selectedFiles.forEach((f, i) => {
-      const row = document.createElement("div");
-      row.className = "file-row";
-
-      const ic = document.createElement("div");
-      ic.className = "file-ic";
-      ic.textContent = iconFor(f.name);
-
-      const main = document.createElement("div");
-      main.className = "file-main";
-      const nm = document.createElement("div");
-      nm.className = "file-name";
-      nm.textContent = f.name;
-      const meta = document.createElement("div");
-      meta.className = "file-meta";
-      meta.textContent = fmtBytes(f.size);
-      main.appendChild(nm);
-      main.appendChild(meta);
-
-      const actions = document.createElement("div");
-      actions.className = "file-actions";
-      const rm = document.createElement("button");
-      rm.type = "button";
-      rm.className = "file-rm";
-      rm.textContent = "Remove";
-      rm.addEventListener("click", () => {
-        selectedFiles.splice(i, 1);
-        afterFileChange();
-      });
-      actions.appendChild(rm);
-
-      row.appendChild(ic);
-      row.appendChild(main);
-      row.appendChild(actions);
-      fileListEl.appendChild(row);
-    });
-  }
-
+  function fmtMB(n) { return (n / (1024 * 1024)).toFixed(1) + " MB"; }
+  function showAlert(el, msg) { el.textContent = msg; el.classList.remove("hidden"); }
+  function hideAlert(el) { el.textContent = ""; el.classList.add("hidden"); }
   function iconFor(name) {
-    const ext = name.split(".").pop().toLowerCase();
+    const ext = (name.split(".").pop() || "").toLowerCase();
     if (ext === "pdf") return "📕";
     if (ext === "docx") return "📘";
     if (ext === "jpg" || ext === "jpeg") return "🖼️";
     return "📄";
   }
+  function extOf(name) { return (name.split(".").pop() || "").toLowerCase(); }
+  function isImage(name) { const e = extOf(name); return e === "jpg" || e === "jpeg"; }
+  function isPdf(name) { return extOf(name) === "pdf"; }
+  function totalBytes() { return selectedDocs.reduce((s, d) => s + d.file.size, 0); }
 
-  function updateCost() {
-    const pages = Math.max(1, parseInt(pagesEl.value, 10) || 0);
-    const copies = Math.max(1, parseInt(copiesEl.value, 10) || 0);
-    const color = colorEl.value;
-    const layout = layoutEl.value;
-    const rate = computeRatePerPage(color, layout);
-    const total = computeTotal(color, layout, pages, copies);
-    if (selectedFiles.length === 0) {
-      costBreakdown.textContent = "Add files to see the price.";
-    } else {
-      costBreakdown.textContent =
-        RUPEE + rate + "/page × " + pages + " page" + (pages > 1 ? "s" : "") +
-        " × " + copies + " cop" + (copies > 1 ? "ies" : "y") +
-        " · " + color + " · " + layout;
+  // Returns an error string if invalid, otherwise "".
+  function validateSizes() {
+    if (selectedDocs.length === 1 && selectedDocs[0].file.size > SINGLE_MAX) {
+      return "That file is " + fmtBytes(selectedDocs[0].file.size) + ". A single file must be 25 MB or smaller.";
     }
-    costTotal.textContent = RUPEE + total;
+    if (selectedDocs.length > 1 && totalBytes() > MULTI_MAX) {
+      return "Your files total " + fmtBytes(totalBytes()) + ". When uploading multiple files the combined size must be 100 MB or smaller.";
+    }
+    return "";
   }
 
-  // Auto page-count from the first PDF — OPTIONAL and lazy.
-  // pdf.js is NOT loaded at page load. We inject it the first time a PDF is added,
-  // inside try/catch, and it never blocks typing or submission. Manual input remains
-  // authoritative: we only auto-fill while the user hasn't touched the Pages field.
+  /* ============================ Pricing fetch ============================ */
+  async function loadPricing() {
+    try {
+      const res = await fetch("/api/pricing", { headers: { "Accept": "application/json" } });
+      const data = await res.json();
+      if (data && data.success && data.pricing && Array.isArray(data.pricing.tiers) && data.pricing.tiers.length) {
+        PRICING = data.pricing;
+      }
+    } catch (e) { /* keep built-in defaults */ }
+    recompute();
+  }
+
+  /* ============================ Cost computation (volume tier) ============================ */
+  // Returns { units, tier, perDoc:[{lineTotal, unitRate}], total }.
+  function computeOrder() {
+    const units = totalUnits();
+    const tier = selectedTier(units);
+    const perDoc = selectedDocs.map((d) => {
+      const key = rateKeyFor(d.color, d.layout);
+      const unitRate = Number(tier.rates[key]) || 0;
+      const lineTotal = unitRate * effPages(d) * effCopies(d);
+      return { unitRate, lineTotal };
+    });
+    const total = perDoc.reduce((s, p) => s + p.lineTotal, 0);
+    return { units, tier, perDoc, total };
+  }
+
+  function recompute() {
+    const { units, tier, perDoc, total } = computeOrder();
+
+    // Per-document line costs.
+    selectedDocs.forEach((d, i) => {
+      const lt = $("docLine-" + d.id);
+      if (lt) lt.textContent = money(perDoc[i].lineTotal);
+      const ur = $("docRate-" + d.id);
+      if (ur) ur.textContent = money(perDoc[i].unitRate) + "/page";
+    });
+
+    // Order total + breakdown + active tier.
+    costTotal.innerHTML = money(total).replace(RUPEE, "&#8377;");
+    if (selectedDocs.length === 0) {
+      costBreakdown.textContent = "Add files to see the price.";
+      tierLine.innerHTML = "";
+    } else {
+      const cur = PRICING.currency || RUPEE;
+      costBreakdown.textContent =
+        selectedDocs.length + " document" + (selectedDocs.length > 1 ? "s" : "") +
+        " · " + units + " printout" + (units > 1 ? "s" : "") + " total";
+      tierLine.innerHTML =
+        '<span class="tier-chip">📊 Volume tier: ' + tier.minPages + "+ pages" +
+        (cur && cur !== RUPEE ? "" : "") + "</span>";
+    }
+  }
+
+  /* ============================ pdf.js lazy load (page detection) ============================ */
   let pdfjsLoading = null;
   function loadPdfJs() {
     if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
@@ -384,48 +502,237 @@
     return pdfjsLoading;
   }
 
-  async function tryAutoPageCount() {
-    const pdf = selectedFiles.find((f) => f.name.toLowerCase().endsWith(".pdf"));
-    if (!pdf) return;
-    // Only auto-fill while the field is untouched (still at default "1").
-    if (pagesEl.dataset.touched === "1") return;
+  // Detect page count for a doc. PDF -> pdf.js; image -> 1 (locked); else -> editable (default 1).
+  async function detectPages(doc) {
+    const name = doc.file.name;
+    if (isImage(name)) {
+      doc.pages = 1; doc.pagesLocked = true; doc.detecting = false;
+      renderDocs(); recompute();
+      return;
+    }
+    if (!isPdf(name)) {
+      // .docx and friends: detection impossible -> editable, default 1.
+      doc.pages = 1; doc.pagesLocked = false; doc.detecting = false;
+      renderDocs(); recompute();
+      return;
+    }
+    // PDF: try pdf.js lazily.
+    doc.detecting = true;
+    renderDocs();
     try {
       const lib = await loadPdfJs();
-      if (!lib) return;
+      if (!lib) throw new Error("no lib");
       try {
         lib.GlobalWorkerOptions.workerSrc =
           "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
       } catch (e) { /* worker optional */ }
-      const buf = await pdf.arrayBuffer();
-      const doc = await lib.getDocument({ data: buf }).promise;
-      if (doc && doc.numPages && pagesEl.dataset.touched !== "1") {
-        pagesEl.value = doc.numPages;
-        pagesHint.textContent = "Auto-detected " + doc.numPages + " page(s) from " + pdf.name + ". Edit if needed.";
-        updateCost();
+      const buf = await doc.file.arrayBuffer();
+      const pdf = await lib.getDocument({ data: buf }).promise;
+      if (pdf && pdf.numPages) {
+        doc.pages = pdf.numPages; doc.pagesLocked = true; doc.detecting = false;
+      } else {
+        doc.pages = doc.pages || 1; doc.pagesLocked = false; doc.detecting = false;
       }
     } catch (err) {
-      // Silent fallback: manual entry is authoritative.
-      pagesHint.textContent = "Enter the page count (default 1).";
+      // Detection failed -> let the student type the count.
+      doc.pages = doc.pages || 1; doc.pagesLocked = false; doc.detecting = false;
     }
+    renderDocs(); recompute();
   }
 
-  function afterFileChange() {
-    renderFileList();
+  /* ============================ Per-document config rendering ============================ */
+  function renderDocs() {
+    if (selectedDocs.length === 0) {
+      docListEl.classList.add("hidden");
+      docListEl.innerHTML = "";
+      return;
+    }
+    docListEl.classList.remove("hidden");
+    docListEl.innerHTML = "";
+
+    selectedDocs.forEach((d) => {
+      const card = document.createElement("div");
+      card.className = "doc";
+
+      // Head: icon + name/size + remove
+      const head = document.createElement("div");
+      head.className = "doc-head";
+
+      const ic = document.createElement("div");
+      ic.className = "doc-ic";
+      ic.textContent = iconFor(d.file.name);
+
+      const idWrap = document.createElement("div");
+      idWrap.className = "doc-id";
+      const nm = document.createElement("div");
+      nm.className = "doc-name";
+      nm.textContent = d.file.name;
+      const sub = document.createElement("div");
+      sub.className = "doc-sub";
+      sub.textContent = fmtBytes(d.file.size);
+      idWrap.appendChild(nm);
+      idWrap.appendChild(sub);
+
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "doc-rm";
+      rm.textContent = "Remove";
+      rm.addEventListener("click", () => {
+        selectedDocs = selectedDocs.filter((x) => x.id !== d.id);
+        afterDocChange();
+      });
+
+      head.appendChild(ic);
+      head.appendChild(idWrap);
+      head.appendChild(rm);
+
+      // Grid: Pages / Copies / Color / Layout
+      const grid = document.createElement("div");
+      grid.className = "doc-grid";
+
+      // ---- Pages ----
+      const fPages = document.createElement("div");
+      fPages.className = "field";
+      const lPages = document.createElement("label");
+      lPages.className = "label";
+      lPages.textContent = "Pages";
+      const iPages = document.createElement("input");
+      iPages.type = "number"; iPages.min = "1"; iPages.step = "1"; iPages.className = "input";
+      iPages.value = d.pages;
+      iPages.setAttribute("inputmode", "numeric");
+      const hPages = document.createElement("div");
+      hPages.className = "pages-hint";
+      if (d.detecting) {
+        iPages.readOnly = true;
+        hPages.textContent = "Detecting…";
+      } else if (d.pagesLocked) {
+        iPages.readOnly = true;
+        hPages.textContent = isImage(d.file.name) ? "Image = 1 page" : "Auto-detected (locked)";
+      } else {
+        iPages.readOnly = false;
+        hPages.textContent = "Enter page count";
+        iPages.addEventListener("input", () => {
+          d.pages = Math.max(1, parseInt(iPages.value, 10) || 1);
+          recompute();
+        });
+        iPages.addEventListener("blur", () => {
+          d.pages = Math.max(1, parseInt(iPages.value, 10) || 1);
+          iPages.value = d.pages;
+          recompute();
+        });
+      }
+      fPages.appendChild(lPages);
+      fPages.appendChild(iPages);
+      fPages.appendChild(hPages);
+
+      // ---- Copies ----
+      const fCopies = document.createElement("div");
+      fCopies.className = "field";
+      const lCopies = document.createElement("label");
+      lCopies.className = "label";
+      lCopies.textContent = "Copies";
+      const iCopies = document.createElement("input");
+      iCopies.type = "number"; iCopies.min = "1"; iCopies.step = "1"; iCopies.className = "input";
+      iCopies.value = d.copies;
+      iCopies.setAttribute("inputmode", "numeric");
+      iCopies.addEventListener("input", () => {
+        d.copies = Math.max(1, parseInt(iCopies.value, 10) || 1);
+        recompute();
+      });
+      iCopies.addEventListener("blur", () => {
+        d.copies = Math.max(1, parseInt(iCopies.value, 10) || 1);
+        iCopies.value = d.copies;
+        recompute();
+      });
+      fCopies.appendChild(lCopies);
+      fCopies.appendChild(iCopies);
+
+      // ---- Color ----
+      const fColor = document.createElement("div");
+      fColor.className = "field";
+      const lColor = document.createElement("label");
+      lColor.className = "label";
+      lColor.textContent = "Color";
+      const sColor = document.createElement("select");
+      sColor.className = "select";
+      ["B&W", "Color"].forEach((opt) => {
+        const o = document.createElement("option");
+        o.value = opt; o.textContent = opt;
+        if (d.color === opt) o.selected = true;
+        sColor.appendChild(o);
+      });
+      sColor.addEventListener("change", () => { d.color = sColor.value; recompute(); });
+      fColor.appendChild(lColor);
+      fColor.appendChild(sColor);
+
+      // ---- Layout ----
+      const fLayout = document.createElement("div");
+      fLayout.className = "field";
+      const lLayout = document.createElement("label");
+      lLayout.className = "label";
+      lLayout.textContent = "Layout";
+      const sLayout = document.createElement("select");
+      sLayout.className = "select";
+      ["Single Sided", "Double Sided"].forEach((opt) => {
+        const o = document.createElement("option");
+        o.value = opt; o.textContent = opt;
+        if (d.layout === opt) o.selected = true;
+        sLayout.appendChild(o);
+      });
+      sLayout.addEventListener("change", () => { d.layout = sLayout.value; recompute(); });
+      fLayout.appendChild(lLayout);
+      fLayout.appendChild(sLayout);
+
+      grid.appendChild(fPages);
+      grid.appendChild(fCopies);
+      grid.appendChild(fColor);
+      grid.appendChild(fLayout);
+
+      // Line cost row
+      const line = document.createElement("div");
+      line.className = "doc-line";
+      const ls = document.createElement("span");
+      ls.className = "ds";
+      ls.innerHTML = 'This document <span id="docRate-' + d.id + '" class="mono"></span>';
+      const lv = document.createElement("span");
+      lv.className = "dv";
+      lv.id = "docLine-" + d.id;
+      lv.textContent = RUPEE + "0";
+      line.appendChild(ls);
+      line.appendChild(lv);
+
+      card.appendChild(head);
+      card.appendChild(grid);
+      card.appendChild(line);
+      docListEl.appendChild(card);
+    });
+  }
+
+  function afterDocChange() {
+    renderDocs();
     const err = validateSizes();
     if (err) showAlert(sizeAlert, err); else hideAlert(sizeAlert);
-    updateCost();
-    tryAutoPageCount();
+    recompute();
   }
 
   function acceptIncoming(fileListLike) {
     const allowed = ["pdf", "docx", "jpg", "jpeg"];
-    const incoming = Array.from(fileListLike).filter((f) => {
-      const ext = f.name.split(".").pop().toLowerCase();
-      return allowed.includes(ext);
-    });
+    const incoming = Array.from(fileListLike).filter((f) => allowed.includes(extOf(f.name)));
     if (incoming.length === 0) return;
-    selectedFiles = selectedFiles.concat(incoming);
-    afterFileChange();
+    const newDocs = incoming.map((f) => ({
+      id: ++docSeq,
+      file: f,
+      pages: 1,
+      copies: 1,
+      color: "B&W",
+      layout: "Single Sided",
+      pagesLocked: false,
+      detecting: false,
+    }));
+    selectedDocs = selectedDocs.concat(newDocs);
+    afterDocChange();
+    // Kick off page detection for each new doc (lazy, non-blocking).
+    newDocs.forEach((d) => { detectPages(d); });
   }
 
   /* ============================ Wiring: file input + drop zone ============================ */
@@ -442,12 +749,8 @@
     if (e.dataTransfer && e.dataTransfer.files) acceptIncoming(e.dataTransfer.files);
   });
 
-  /* ============================ Wiring: spec inputs ============================ */
-  pagesEl.addEventListener("input", () => { pagesEl.dataset.touched = "1"; updateCost(); });
-  copiesEl.addEventListener("input", updateCost);
-  layoutEl.addEventListener("change", updateCost);
-  colorEl.addEventListener("change", updateCost);
-  updateCost();
+  recompute();
+  loadPricing();
 
   /* ============================ Tracking UI ============================ */
   const STEP_KEYS = ["reserve", "upload", "finalize"];
@@ -482,54 +785,234 @@
       if (icon) icon.textContent = "✖";
     }
   }
-  /* ============================ Real elapsed timer ============================ */
-  let timerStart = 0;
-  let timerHandle = null;
-  function startTimer() {
-    timerStart = Date.now();
-    if (timerHandle) clearInterval(timerHandle);
-    trackTimer.textContent = "0.0s";
-    timerHandle = setInterval(() => {
-      trackTimer.textContent = ((Date.now() - timerStart) / 1000).toFixed(1) + "s";
-    }, 100);
+
+  /* ============================ Always-moving progress bar (#5) ============================
+     We separate the REAL aggregate progress from the DISPLAYED progress.
+       - realPct      : what the byte counters / phase actually say.
+       - phaseCap     : the displayed value may creep toward this, but never past it,
+                        until the phase truly completes.
+       - displayPct   : eased toward max(realPct, creeping) so the bar never freezes.
+     A single rAF loop drives displayPct; even when bytes stall (server/Drive
+     processing), it keeps nudging forward slowly toward the cap.
+     ========================================================================== */
+  let realPct = 0;       // truthful progress
+  let phaseCap = 0;      // ceiling the bar may creep toward this phase
+  let displayPct = 0;    // what the user sees
+  let rafHandle = null;
+  let rafLast = 0;
+
+  function setReal(pct) { realPct = Math.max(realPct, Math.min(100, pct)); }
+  function setPhaseCap(cap) { phaseCap = Math.min(100, cap); }
+
+  function startBar() {
+    stopBar();
+    rafLast = performance.now();
+    const tick = (now) => {
+      const dt = Math.min(0.1, (now - rafLast) / 1000);
+      rafLast = now;
+
+      // Target the bar should approach: the higher of real progress and the
+      // creep ceiling (so it keeps moving while bytes are momentarily stalled).
+      const ceiling = Math.max(realPct, Math.min(phaseCap, displayPct + 40));
+      const target = Math.min(ceiling, phaseCap > 0 ? phaseCap : 100);
+
+      const remaining = target - displayPct;
+      if (remaining > 0.05) {
+        // Ease: speed scales with remaining distance, but always at least a slow creep.
+        const easeSpeed = remaining * 2.2;        // %/sec, proportional
+        const creepSpeed = Math.max(0.6, remaining * 0.15); // floor so it never looks frozen
+        const speed = Math.max(easeSpeed, creepSpeed);
+        displayPct = Math.min(target, displayPct + speed * dt);
+      } else if (realPct > displayPct) {
+        displayPct = Math.min(realPct, displayPct + (realPct - displayPct) * Math.min(1, dt * 6));
+      }
+
+      trackBar.style.width = displayPct.toFixed(2) + "%";
+      trackPct.textContent = Math.round(displayPct) + "%";
+      rafHandle = requestAnimationFrame(tick);
+    };
+    rafHandle = requestAnimationFrame(tick);
   }
-  function stopTimer() {
-    if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
-    const secs = ((Date.now() - timerStart) / 1000);
-    trackTimer.textContent = secs.toFixed(1) + "s";
-    return secs;
+  function stopBar() {
+    if (rafHandle) { cancelAnimationFrame(rafHandle); rafHandle = null; }
+  }
+  function finishBar() {
+    setReal(100); setPhaseCap(100);
+    displayPct = 100;
+    trackBar.style.width = "100%";
+    trackPct.textContent = "100%";
+    stopBar();
   }
 
-  function setProgress(pct, label) {
-    trackBar.style.width = Math.max(0, Math.min(100, pct)) + "%";
-    trackPct.textContent = Math.round(pct) + "%";
-    if (label) trackLabel.textContent = label;
+  /* ============================ Transferred + ETA metrics (#5) ============================ */
+  let aggTotalBytes = 0;   // sum of total bytes across files that actually upload
+  let aggLoadedBytes = 0;  // sum of loaded bytes
+  let metricsStart = 0;
+  let smoothedRate = 0;    // bytes/sec, EMA-smoothed
+  let metricsHandle = null;
+
+  function startMetrics(totalBytesToSend) {
+    aggTotalBytes = totalBytesToSend;
+    aggLoadedBytes = 0;
+    metricsStart = performance.now();
+    smoothedRate = 0;
+    updateMetricsDisplay();
+    if (metricsHandle) clearInterval(metricsHandle);
+    metricsHandle = setInterval(updateMetricsDisplay, 250);
+  }
+  function stopMetrics() {
+    if (metricsHandle) { clearInterval(metricsHandle); metricsHandle = null; }
+  }
+  function updateMetricsDisplay() {
+    // Transferred readout.
+    trackData.textContent = fmtMB(aggLoadedBytes) + " / " + fmtMB(aggTotalBytes || aggLoadedBytes);
+
+    // ETA from transfer rate, smoothed.
+    const elapsed = (performance.now() - metricsStart) / 1000;
+    if (aggTotalBytes <= 0) { trackEta.textContent = "—"; return; }
+    if (aggLoadedBytes <= 0 || elapsed < 0.3) { trackEta.textContent = "calculating…"; return; }
+    const instRate = aggLoadedBytes / elapsed; // bytes/sec
+    smoothedRate = smoothedRate === 0 ? instRate : (smoothedRate * 0.7 + instRate * 0.3);
+    const remainingBytes = Math.max(0, aggTotalBytes - aggLoadedBytes);
+    if (smoothedRate <= 0) { trackEta.textContent = "calculating…"; return; }
+    let secs = remainingBytes / smoothedRate;
+    if (remainingBytes <= 0) { trackEta.textContent = "~0s left"; return; }
+    secs = Math.max(1, Math.round(secs));
+    if (secs >= 60) {
+      const m = Math.floor(secs / 60), s = secs % 60;
+      trackEta.textContent = "~" + m + "m " + s + "s left";
+    } else {
+      trackEta.textContent = "~" + secs + "s left";
+    }
   }
 
-  // Gentle "creep" so the bar keeps visibly moving while we wait on Drive
-  // (the server->Drive leg emits no byte events). Eases toward `to`, never reaching it.
-  let creepHandle = null;
-  function startCreep(from, to) {
-    stopCreep();
-    let cur = from;
-    setProgress(cur);
-    creepHandle = setInterval(() => {
-      cur += (to - cur) * 0.08;
-      setProgress(Math.min(cur, to - 0.4));
-    }, 350);
-  }
-  function stopCreep() {
-    if (creepHandle) { clearInterval(creepHandle); creepHandle = null; }
-  }
+  /* ============================ Tic-tac-toe (entertainment) ============================ */
+  const tttBoardEl  = $("tttBoard");
+  const tttStatusEl = $("tttStatus");
+  const tttResetBtn = $("tttReset");
+  const TTT_LINES = [
+    [0,1,2],[3,4,5],[6,7,8],   // rows
+    [0,3,6],[1,4,7],[2,5,8],   // cols
+    [0,4,8],[2,4,6],           // diagonals
+  ];
+  let tttBoard = Array(9).fill("");
+  let tttOver = false;
+  let tttThinking = false;
+  let tttResetTimer = null;
 
-  /* ============================ Upload one file (real byte progress) ============================ */
+  function tttBuild() {
+    tttBoardEl.innerHTML = "";
+    for (let i = 0; i < 9; i++) {
+      const c = document.createElement("button");
+      c.type = "button";
+      c.className = "ttt-cell";
+      c.dataset.i = String(i);
+      c.addEventListener("click", () => tttPlayerMove(i));
+      tttBoardEl.appendChild(c);
+    }
+    tttRender();
+  }
+  function tttRender(winLine) {
+    const cells = tttBoardEl.children;
+    for (let i = 0; i < 9; i++) {
+      const c = cells[i];
+      const v = tttBoard[i];
+      c.textContent = v;
+      c.className = "ttt-cell" + (v ? " taken " + (v === "X" ? "x" : "o") : "");
+    }
+    if (winLine) winLine.forEach((i) => cells[i].classList.add("win"));
+  }
+  function tttWinner(b) {
+    for (const ln of TTT_LINES) {
+      const [a, c, d] = ln;
+      if (b[a] && b[a] === b[c] && b[a] === b[d]) return { who: b[a], line: ln };
+    }
+    if (b.every((x) => x)) return { who: "draw", line: null };
+    return null;
+  }
+  function tttPlayerMove(i) {
+    if (tttOver || tttThinking || tttBoard[i]) return;
+    tttBoard[i] = "X";
+    tttRender();
+    let res = tttWinner(tttBoard);
+    if (res) return tttEnd(res);
+    tttThinking = true;
+    tttStatusEl.textContent = "Bot is thinking…";
+    setTimeout(tttBotMove, 320);
+  }
+  function tttBotMove() {
+    tttThinking = false;
+    if (tttOver) return;
+    const i = tttBestMove(tttBoard, "O");
+    if (i >= 0) tttBoard[i] = "O";
+    tttRender();
+    const res = tttWinner(tttBoard);
+    if (res) return tttEnd(res);
+    tttStatusEl.textContent = "Your turn — you are X.";
+  }
+  // Smart move: win > block > minimax-lite (center/corner heuristic with lookahead).
+  function tttBestMove(b, me) {
+    const opp = me === "O" ? "X" : "O";
+    // 1) Win if possible.
+    for (let i = 0; i < 9; i++) if (!b[i]) { b[i] = me; const w = tttWinner(b); b[i] = ""; if (w && w.who === me) return i; }
+    // 2) Block opponent's win.
+    for (let i = 0; i < 9; i++) if (!b[i]) { b[i] = opp; const w = tttWinner(b); b[i] = ""; if (w && w.who === opp) return i; }
+    // 3) Minimax for the optimal remaining move.
+    let best = -Infinity, move = -1;
+    for (let i = 0; i < 9; i++) {
+      if (!b[i]) {
+        b[i] = me;
+        const score = tttMinimax(b, false, me, opp, 0);
+        b[i] = "";
+        if (score > best) { best = score; move = i; }
+      }
+    }
+    return move;
+  }
+  function tttMinimax(b, maximizing, me, opp, depth) {
+    const w = tttWinner(b);
+    if (w) {
+      if (w.who === me) return 10 - depth;
+      if (w.who === opp) return depth - 10;
+      return 0;
+    }
+    if (maximizing) {
+      let best = -Infinity;
+      for (let i = 0; i < 9; i++) if (!b[i]) { b[i] = me; best = Math.max(best, tttMinimax(b, false, me, opp, depth + 1)); b[i] = ""; }
+      return best;
+    } else {
+      let best = Infinity;
+      for (let i = 0; i < 9; i++) if (!b[i]) { b[i] = opp; best = Math.min(best, tttMinimax(b, true, me, opp, depth + 1)); b[i] = ""; }
+      return best;
+    }
+  }
+  function tttEnd(res) {
+    tttOver = true;
+    tttRender(res.line);
+    if (res.who === "X") tttStatusEl.textContent = "🎉 You win! New game starting…";
+    else if (res.who === "O") tttStatusEl.textContent = "🤖 Bot wins! New game starting…";
+    else tttStatusEl.textContent = "🤝 It's a draw! New game starting…";
+    if (tttResetTimer) clearTimeout(tttResetTimer);
+    tttResetTimer = setTimeout(tttReset, 1800);
+  }
+  function tttReset() {
+    if (tttResetTimer) { clearTimeout(tttResetTimer); tttResetTimer = null; }
+    tttBoard = Array(9).fill("");
+    tttOver = false;
+    tttThinking = false;
+    tttStatusEl.textContent = "You are X — tap a square.";
+    tttRender();
+  }
+  tttResetBtn.addEventListener("click", tttReset);
+  tttBuild();
+
+  /* ============================ Upload primitives ============================ */
   function readBase64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result || "";
         const comma = result.indexOf(",");
-        // Strip the "data:<mime>;base64," prefix per contract.
         resolve(comma >= 0 ? result.slice(comma + 1) : result);
       };
       reader.onerror = () => reject(new Error("Could not read " + file.name));
@@ -537,16 +1020,49 @@
     });
   }
 
-  // XHR (not fetch) so we get real upload byte-progress events.
-  function postToProxy(payload, onUploadProgress, onSent) {
+  // SHA-256 hex of file content (browser-computed). null if crypto.subtle unavailable.
+  async function sha256Hex(file) {
+    if (!(window.crypto && crypto.subtle)) return null;
+    const buf = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", buf);
+    const bytes = new Uint8Array(digest);
+    let hex = "";
+    for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
+    return hex;
+  }
+
+  // RESOLVE: ask the server whether this exact content is already available (non-expired).
+  // Returns { reuse, webViewLink, promoted } or { reuse:false }.
+  async function resolveHash(fileHash) {
+    if (!fileHash) return { reuse: false };
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ check: true, fileHash: fileHash })
+      });
+      const data = await res.json();
+      // New backend signals instant reuse via {reuse:true}; older backends used
+      // {promoted:true}. Accept either as long as a usable link is present.
+      const canReuse = data && data.success && data.webViewLink && (data.reuse === true || data.promoted === true);
+      if (canReuse) {
+        return { reuse: true, webViewLink: data.webViewLink, promoted: !!data.promoted };
+      }
+      return { reuse: false };
+    } catch (e) {
+      return { reuse: false };
+    }
+  }
+
+  // UPLOAD via XHR so we get real upload byte-progress events.
+  function uploadBytes(payload, onProgress) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/upload");
       xhr.setRequestHeader("Content-Type", "application/json");
       xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && onUploadProgress) onUploadProgress(e.loaded, e.total);
+        if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
       };
-      xhr.upload.onload = () => { if (onSent) onSent(); };
       xhr.onload = () => {
         let data;
         try { data = JSON.parse(xhr.responseText); }
@@ -562,54 +1078,6 @@
     });
   }
 
-  // SHA-256 of the file content (hex). Enables server-side de-duplication.
-  // Requires a secure context (HTTPS / localhost) — null-safe if unavailable.
-  async function sha256Hex(file) {
-    if (!(window.crypto && crypto.subtle)) return null;
-    const buf = await file.arrayBuffer();
-    const digest = await crypto.subtle.digest("SHA-256", buf);
-    const bytes = new Uint8Array(digest);
-    let hex = "";
-    for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
-    return hex;
-  }
-
-  async function uploadToGAS(file, tokenNumber, onUploadProgress, onSent) {
-    // 1. Content hash (non-fatal if the browser can't compute it).
-    let fileHash = null;
-    try { fileHash = await sha256Hex(file); } catch (e) { fileHash = null; }
-
-    // 2. Cheap check: if this exact content was already promoted to the catalog,
-    //    skip the upload entirely and reuse the permanent link.
-    if (fileHash) {
-      try {
-        const chkRes = await fetch("/api/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ check: true, fileHash: fileHash })
-        });
-        const chk = await chkRes.json();
-        if (chk && chk.success && chk.promoted && chk.webViewLink) {
-          if (onUploadProgress) onUploadProgress(1, 1); // fill this file's slice instantly
-          return { name: file.name, sizeBytes: file.size, url: chk.webViewLink, fromCatalog: true };
-        }
-      } catch (e) { /* fall through to a normal upload */ }
-    }
-
-    // 3. Normal upload (with the hash so the backend can count / auto-promote).
-    const fileBase64 = await readBase64(file);
-    const payload = {
-      fileName: file.name,
-      tokenNumber: tokenNumber,
-      fileBase64: fileBase64,
-      isCatalogItem: false,
-      mimeType: file.type || "",
-      fileHash: fileHash || ""
-    };
-    const data = await postToProxy(payload, onUploadProgress, onSent);
-    return { name: file.name, sizeBytes: file.size, url: data.webViewLink, fromCatalog: !!data.fromCatalog };
-  }
-
   /* ============================ Submit flow ============================ */
   submitBtn.addEventListener("click", onSubmit);
 
@@ -617,27 +1085,54 @@
     hideAlert(formError);
     const sid = studentIdEl.value.trim();
     if (!sid) return "Please enter your Name / Roll Number.";
-    if (selectedFiles.length === 0) return "Please add at least one file (PDF, DOCX, JPG or JPEG).";
+    if (selectedDocs.length === 0) return "Please add at least one file (PDF, DOCX, JPG or JPEG).";
     const sizeErr = validateSizes();
     if (sizeErr) return sizeErr;
-    const pages = parseInt(pagesEl.value, 10);
-    if (!pages || pages < 1) return "Pages per copy must be at least 1.";
-    const copies = parseInt(copiesEl.value, 10);
-    if (!copies || copies < 1) return "Copies must be at least 1.";
+    for (const d of selectedDocs) {
+      if (effPages(d) < 1) return "Pages must be at least 1 for " + d.file.name + ".";
+      if (effCopies(d) < 1) return "Copies must be at least 1 for " + d.file.name + ".";
+    }
     return "";
+  }
+
+  // Per-file upload state used to aggregate byte progress.
+  // Each: { doc, hash, total, loaded, reuse, info }
+  function makeJobs() {
+    return selectedDocs.map((d) => ({
+      doc: d,
+      hash: null,
+      total: d.file.size,
+      loaded: 0,
+      reuse: false,
+      info: null,
+    }));
+  }
+
+  function recalcAggLoaded(jobs) {
+    aggLoadedBytes = jobs.reduce((s, j) => s + (j.reuse ? 0 : j.loaded), 0);
+  }
+
+  // Run an array of async task factories with a bounded pool.
+  async function runPool(items, size, worker) {
+    let idx = 0;
+    const runners = [];
+    const launch = async () => {
+      while (idx < items.length) {
+        const my = idx++;
+        await worker(items[my], my);
+      }
+    };
+    const n = Math.min(size, items.length);
+    for (let i = 0; i < n; i++) runners.push(launch());
+    await Promise.all(runners);
   }
 
   async function onSubmit() {
     const err = preflightValidate();
     if (err) { showAlert(formError, err); return; }
 
-    // Lock the form and reveal the tracker.
     const sid = studentIdEl.value.trim();
-    const pages = Math.max(1, parseInt(pagesEl.value, 10));
-    const copies = Math.max(1, parseInt(copiesEl.value, 10));
-    const color = colorEl.value;
-    const layout = layoutEl.value;
-    const price = computeTotal(color, layout, pages, copies);
+    const order = computeOrder();
 
     submitBtn.disabled = true;
     submitBtn.textContent = "Working…";
@@ -647,8 +1142,17 @@
     resultCard.classList.remove("hidden");
     tokenBig.textContent = "#---";
     buildSteps();
-    startTimer();
-    setProgress(5, "Reserving token…");
+
+    // Reset bar + metrics + start a fresh tic-tac-toe game.
+    realPct = 0; phaseCap = 0; displayPct = 0;
+    trackBar.style.width = "0%"; trackPct.textContent = "0%";
+    trackData.textContent = "0.0 MB / 0.0 MB";
+    trackEta.textContent = "calculating…";
+    startBar();
+    setPhaseCap(15);
+    setReal(4);
+    trackLabel.textContent = "Reserving token…";
+    tttReset();
     resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
 
     let tokenId;
@@ -663,67 +1167,164 @@
       tokenId = data.token_id;
       tokenBig.textContent = "#" + tokenId;
       setStep("reserve", "done");
-      setProgress(15, "Token #" + tokenId + " reserved");
+      setReal(15);
     } catch (e) {
       setStep("reserve", "error");
       failStep("Could not reserve a token. " + e.message);
       return;
     }
 
-    /* ---- Step 2: upload each file to Drive via GAS ---- */
-    let uploaded = [];
+    /* ---- Step 2: hash, RESOLVE in parallel, then UPLOAD the rest with a pool ---- */
+    const jobs = makeJobs();
     try {
       setStep("upload", "active");
-      const n = selectedFiles.length;
-      for (let i = 0; i < n; i++) {
-        const f = selectedFiles[i];
-        const base = 15 + (70 * i) / n;   // this file's slice of the 15%..85% band
-        const span = 70 / n;
-        trackLabel.textContent = "Uploading " + (i + 1) + " of " + n + ": " + f.name;
-        const info = await uploadToGAS(
-          f, tokenId,
-          // real network send -> first 60% of this file's slice
-          (loaded, total) => { stopCreep(); setProgress(base + span * 0.6 * (loaded / total)); },
-          // bytes sent, now waiting on Drive -> creep through the rest of the slice
-          () => { trackLabel.textContent = "Saving to Drive: " + f.name + "…"; startCreep(base + span * 0.6, base + span); }
-        );
-        stopCreep();
-        setProgress(base + span);
-        uploaded.push(info);
+      trackLabel.textContent = "Checking for instant re-use…";
+      setPhaseCap(28);
+
+      // 2a. Hash every file (browser SHA-256).
+      await Promise.all(jobs.map(async (j) => {
+        try { j.hash = await sha256Hex(j.doc.file); } catch (e) { j.hash = null; }
+      }));
+
+      // 2b. RESOLVE all hashes in parallel (instant reuse skips bytes entirely).
+      await Promise.all(jobs.map(async (j) => {
+        const r = await resolveHash(j.hash);
+        if (r.reuse) { j.reuse = true; j.info = { webViewLink: r.webViewLink, fromCatalog: true, promoted: r.promoted }; }
+      }));
+      setReal(30);
+
+      // 2c. Figure out how many bytes we actually need to send (non-reused only).
+      const toUpload = jobs.filter((j) => !j.reuse);
+      const bytesToSend = toUpload.reduce((s, j) => s + j.total, 0);
+      const reusedCount = jobs.length - toUpload.length;
+
+      startMetrics(bytesToSend);
+      recalcAggLoaded(jobs);
+      updateMetricsDisplay();
+
+      // The upload phase fills the bar from 30% -> 85%. Aggregate byte progress
+      // drives realPct within that band; the rAF creep keeps it moving meanwhile.
+      const PHASE_LO = 30, PHASE_HI = 85;
+      function pushAggregateProgress() {
+        recalcAggLoaded(jobs);
+        if (bytesToSend > 0) {
+          const frac = Math.min(1, aggLoadedBytes / bytesToSend);
+          setReal(PHASE_LO + (PHASE_HI - PHASE_LO) * frac);
+        }
       }
+
+      if (toUpload.length === 0) {
+        // Everything was instant.
+        trackLabel.textContent = reusedCount + " file" + (reusedCount > 1 ? "s" : "") + " served instantly ⚡";
+        setReal(PHASE_HI);
+      } else {
+        setPhaseCap(PHASE_HI);
+        trackLabel.textContent = "Uploading " + toUpload.length + " file" + (toUpload.length > 1 ? "s" : "") +
+          (reusedCount > 0 ? " · " + reusedCount + " instant ⚡" : "");
+
+        // 2d. Upload bytes concurrently with a bounded pool (#6).
+        let failure = null;
+        await runPool(toUpload, UPLOAD_POOL, async (j) => {
+          if (failure) return;
+          let base64;
+          try { base64 = await readBase64(j.doc.file); }
+          catch (e) { failure = e; return; }
+          const payload = {
+            fileName: j.doc.file.name,
+            tokenNumber: tokenId,
+            fileBase64: base64,
+            isCatalogItem: false,
+            mimeType: j.doc.file.type || "",
+            fileHash: j.hash || ""
+          };
+          try {
+            const data = await uploadBytes(payload, (loaded, total) => {
+              j.loaded = loaded;
+              j.total = total || j.total;
+              pushAggregateProgress();
+            });
+            // Bytes fully sent; server is now finishing with Drive — count as done.
+            j.loaded = j.total;
+            pushAggregateProgress();
+            j.info = { webViewLink: data.webViewLink, fromCatalog: !!data.fromCatalog, promoted: !!data.promoted };
+          } catch (e) {
+            failure = e;
+          }
+        });
+        if (failure) throw failure;
+        setReal(PHASE_HI);
+      }
+
+      stopMetrics();
+      // Final transferred readout reflects everything that moved.
+      recalcAggLoaded(jobs);
+      aggLoadedBytes = bytesToSend; // clamp to total for a clean finish
+      updateMetricsDisplay();
+
       setStep("upload", "done");
-      setProgress(85, "All files uploaded");
+      trackLabel.textContent = "All files ready";
     } catch (e) {
-      stopCreep();
+      stopMetrics();
       setStep("upload", "error");
       failStep("File upload failed. " + e.message);
       return;
     }
 
-    /* ---- Step 3: finalize the order ---- */
+    /* ---- Step 3: finalize the order (build print_specifications per contract) ---- */
     try {
       setStep("finalize", "active");
-      setProgress(88, "Placing order in shop queue…");
+      setPhaseCap(99);
+      setReal(90);
+      trackLabel.textContent = "Placing order in shop queue…";
 
-      const totalSizeBytes = uploaded.reduce((s, u) => s + u.sizeBytes, 0);
-      const displayName = uploaded.length === 1 ? uploaded[0].name : (uploaded.length + " files");
+      const o = computeOrder(); // recompute against the (unchanged) doc settings
+      const files = selectedDocs.map((d, i) => {
+        const job = jobs.find((j) => j.doc.id === d.id);
+        const unitRate = o.perDoc[i].unitRate;
+        const lineTotal = o.perDoc[i].lineTotal;
+        return {
+          name: d.file.name,
+          sizeBytes: d.file.size,
+          url: job && job.info ? job.info.webViewLink : "",
+          pages: effPages(d),
+          copies: effCopies(d),
+          color: d.color,                 // "B&W" | "Color"
+          layout: d.layout,               // "Single Sided" | "Double Sided"
+          unitRate: unitRate,
+          lineTotal: Math.round(lineTotal * 100) / 100
+        };
+      });
+
+      const totalSizeBytes = selectedDocs.reduce((s, d) => s + d.file.size, 0);
+      const totalPages = o.units; // sum of pages*copies
+      const totalRounded = Math.round(o.total * 100) / 100;
+      const displayName = files.length === 1 ? files[0].name : (files.length + " files");
+
       const print_specifications = {
-        fileName: displayName,
-        fileCount: uploaded.length,
+        // Contract fields:
+        fileCount: files.length,
         totalSizeBytes: totalSizeBytes,
-        pages: pages,
-        copies: copies,
-        color: color,
-        layout: layout,
-        files: uploaded
+        totalPages: totalPages,
+        tierMinPages: o.tier.minPages,
+        total: totalRounded,
+        files: files,
+        // Convenience summary fields for the shopkeeper tiles/list (single-doc orders
+        // show their own specs; multi-doc orders show a representative summary):
+        fileName: displayName,
+        color: files.length === 1 ? files[0].color : "Mixed",
+        layout: files.length === 1 ? files[0].layout : "Mixed",
+        pages: files.length === 1 ? files[0].pages : totalPages,
+        copies: files.length === 1 ? files[0].copies : files.reduce((s, f) => s + f.copies, 0)
       };
+
+      const firstUrl = (files.find((f) => f.url) || files[0]).url || "";
 
       const body = {
         token_id: tokenId,
         student_id: sid,
-        drive_viewer_url: uploaded[0].url,
+        drive_viewer_url: firstUrl,
         print_specifications: print_specifications,
-        calculated_price: price
+        calculated_price: totalRounded
       };
 
       const res = await fetch("/api/orders", {
@@ -736,28 +1337,30 @@
         throw new Error(data.error || ("Could not place order (HTTP " + res.status + ")."));
       }
       setStep("finalize", "done");
-      setProgress(100, "Done");
+      finishBar();
+
+      /* ---- Success ---- */
+      const reusedCount = jobs.filter((j) => j.reuse).length;
+      const promotedCount = jobs.filter((j) => j.info && j.info.promoted && !j.reuse).length;
+      trackLabel.textContent = "Complete";
+      successToken.textContent = "#" + tokenId;
+      successCash.textContent =
+        "Pay " + money(totalRounded) + " in cash when you collect." +
+        (reusedCount > 0 ? "  ·  ⚡ " + reusedCount + " file" + (reusedCount > 1 ? "s" : "") + " served instantly" : "") +
+        (promotedCount > 0 ? "  ·  ⭐ " + promotedCount + " saved to catalog" : "");
+      successBadge.classList.remove("hidden");
+      submitBtn.textContent = "Generate Print Token";
+      successBadge.scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) {
       setStep("finalize", "error");
       failStep("Could not place your order. " + e.message + " (Your token is #" + tokenId + " — show this if the file already uploaded.)");
       return;
     }
-
-    /* ---- Success ---- */
-    const elapsed = stopTimer();
-    const cachedCount = uploaded.filter((u) => u.fromCatalog).length;
-    trackLabel.textContent = "Complete in " + elapsed.toFixed(1) + "s";
-    successToken.textContent = "#" + tokenId;
-    successCash.textContent = "Pay " + RUPEE + price + " in cash when you collect.  ·  Ready in " + elapsed.toFixed(1) + "s" +
-      (cachedCount > 0 ? "  ·  ⚡ " + cachedCount + " file" + (cachedCount > 1 ? "s" : "") + " served instantly from catalog" : "");
-    successBadge.classList.remove("hidden");
-    submitBtn.textContent = "Generate Print Token";
-    successBadge.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function failStep(msg) {
-    stopTimer();
-    stopCreep();
+    stopMetrics();
+    stopBar();
     showAlert(stepError, msg);
     submitBtn.disabled = false;
     submitBtn.textContent = "Generate Print Token";
@@ -766,24 +1369,19 @@
 
   /* ============================ New order reset ============================ */
   newOrderBtn.addEventListener("click", () => {
-    selectedFiles = [];
+    selectedDocs = [];
     studentIdEl.value = "";
-    pagesEl.value = "1";
-    delete pagesEl.dataset.touched;
-    pagesHint.textContent = "Enter the page count (default 1).";
-    copiesEl.value = "1";
-    layoutEl.value = "Single Sided";
-    colorEl.value = "B&W";
     hideAlert(sizeAlert);
     hideAlert(formError);
     hideAlert(stepError);
-    renderFileList();
-    updateCost();
+    renderDocs();
+    recompute();
     resultCard.classList.add("hidden");
     successBadge.classList.add("hidden");
     submitBtn.disabled = false;
     submitBtn.textContent = "Generate Print Token";
     formCard.classList.remove("is-locked");
+    stopBar(); stopMetrics(); tttReset();
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
 
@@ -801,9 +1399,7 @@
     loginModal.classList.add("open");
     setTimeout(() => { try { loginUser.focus(); } catch (e) {} }, 50);
   }
-  function closeLogin() {
-    loginModal.classList.remove("open");
-  }
+  function closeLogin() { loginModal.classList.remove("open"); }
 
   async function doLogin() {
     hideAlert(loginError);

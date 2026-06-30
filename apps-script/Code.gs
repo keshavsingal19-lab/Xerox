@@ -7,15 +7,22 @@
  *   Who has access: Anyone.
  *
  * REQUIRED ADVANCED SERVICE:
- *   nightlyStorageCleanup() calls Drive.Files.emptyTrash(), which is part of the
+ *   storageCleanup() calls Drive.Files.emptyTrash(), which is part of the
  *   ADVANCED Google Drive Service. You MUST enable it once:
  *     Editor -> Services (+) -> "Drive API" -> Add.
  *   Without it, Drive.Files.emptyTrash() will throw "Drive is not defined".
  *
+ * RETENTION MODEL:
+ *   - Daily Pending files (every fresh student upload) expire after 2 HOURS.
+ *   - Master Catalog files (promoted "popular" files, hit 3 times within the
+ *     2-hour window) live for 3 DAYS.
+ *   storageCleanup() trashes Daily Pending files older than 2h and Master
+ *   Catalog files older than 3 days, then empties the trash to reclaim storage.
+ *
  * Operator setup steps:
  *   1. Paste the two folder IDs into the CONFIG block below.
  *   2. Enable the Advanced Drive Service (see above).
- *   3. Run createNightlyTrigger() ONCE to install the 23:59 cleanup trigger.
+ *   3. Run createCleanupTrigger() ONCE to install the hourly cleanup trigger.
  *   4. Deploy as a Web App and copy the /exec URL into the student frontend CONFIG.
  *
  * CORS note: the browser posts Content-Type "text/plain;charset=utf-8" to dodge the
@@ -24,11 +31,15 @@
  */
 
 /* ===================== CONFIG (operator pastes the folder IDs) ===================== */
-// Folder that holds the per-day uploaded student print files (auto-trashed nightly).
+// Folder that holds the per-day uploaded student print files (auto-trashed after 2h).
 var DAILY_PENDING_FOLDER_ID = 'PASTE_DAILY_PENDING_FOLDER_ID';
-// Folder that holds the permanent catalog files (forms, notes, etc.) — never deleted.
+// Folder that holds the promoted Master Catalog files (popular reuse copies, kept 3 days).
 var MASTER_CATALOG_FOLDER_ID = 'PASTE_MASTER_CATALOG_FOLDER_ID';
 /* =================================================================================== */
+
+// Retention windows (milliseconds).
+var PENDING_TTL_MS = 2 * 60 * 60 * 1000;       // 2 hours
+var CATALOG_TTL_MS = 3 * 24 * 60 * 60 * 1000;  // 3 days
 
 
 /**
@@ -75,18 +86,25 @@ function doGet(e) {
 
 
 /**
- * Receives a file upload (or a catalog lookup) from the student frontend.
+ * Receives a file upload, a catalog lookup, or a promotion request from the frontend.
  *
  * The browser sends Content-Type text/plain (to avoid a CORS preflight), so we read
  * the raw body from e.postData.contents and JSON.parse it ourselves.
  *
- * Payload: { fileName, tokenNumber, fileBase64, isCatalogItem (bool), mimeType? }
+ * Branches (checked in order):
  *
- * - isCatalogItem === true: find the existing file BY NAME inside MASTER_CATALOG_FOLDER_ID
- *   and return its getUrl() as webViewLink (no new file is created).
- * - otherwise: base64-decode fileBase64 into a Blob, create it in DAILY_PENDING_FOLDER_ID,
- *   rename it to "XEROX_TOKEN_<tokenNumber>_<fileName>", share ANYONE_WITH_LINK/VIEW,
- *   and return its link.
+ *  - { action:"promote", fileId } -> copy the given Daily Pending file into the Master
+ *    Catalog folder, share ANYONE_WITH_LINK/VIEW, and return the new copy's link.
+ *    Used by the dedup auto-promotion flow once a file is hit 3 times within 2h.
+ *
+ *  - { isCatalogItem:true, fileName } -> find the existing file BY NAME inside
+ *    MASTER_CATALOG_FOLDER_ID and return its getUrl() as webViewLink (no file created).
+ *
+ *  - otherwise (upload) -> base64-decode fileBase64 into a Blob, create it in the target
+ *    folder (DAILY_PENDING_FOLDER_ID by default, MASTER_CATALOG_FOLDER_ID when
+ *    target==="catalog"), rename it ("XEROX_TOKEN_<tokenNumber>_<fileName>" for pending
+ *    or "CATALOG_<shortHash>_<fileName>" for catalog), share ANYONE_WITH_LINK/VIEW, and
+ *    return its link.
  */
 function doPost(e) {
   try {
@@ -95,6 +113,45 @@ function doPost(e) {
     }
 
     var payload = JSON.parse(e.postData.contents);
+
+    // --- PROMOTE branch: handled FIRST (no fileName required). -----------------------
+    // The dedup flow on the 3rd hit of a still-pending file asks us to copy it from the
+    // Daily Pending folder into the permanent-ish Master Catalog (kept 3 days), so all
+    // subsequent students reuse the catalog copy.
+    if (payload.action === 'promote') {
+      if (!payload.fileId) {
+        throw new Error('Missing fileId for promote');
+      }
+      if (MASTER_CATALOG_FOLDER_ID === 'PASTE_MASTER_CATALOG_FOLDER_ID') {
+        throw new Error(
+          'Apps Script is not configured: MASTER_CATALOG_FOLDER_ID is still the ' +
+          'PASTE_ placeholder, so a file cannot be promoted into the Master Catalog. ' +
+          'Paste the real Master Catalog Drive folder ID into the CONFIG block at the ' +
+          'top of Code.gs and redeploy.'
+        );
+      }
+
+      var catalogFolderForPromote = DriveApp.getFolderById(MASTER_CATALOG_FOLDER_ID);
+      var sourceFile = DriveApp.getFileById(payload.fileId);
+
+      // Build a clean catalog name: strip the per-upload "XEROX_TOKEN_<n>_" prefix so the
+      // catalog copy is named for the document, not the originating token.
+      var sourceName = sourceFile.getName();
+      var cleanedName = sourceName.replace(/^XEROX_TOKEN_[^_]*_/, '');
+      var catalogName = (cleanedName.indexOf('CATALOG_') === 0)
+        ? cleanedName
+        : ('CATALOG_' + cleanedName);
+
+      var promotedFile = sourceFile.makeCopy(catalogName, catalogFolderForPromote);
+      promotedFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+      return jsonOutput({
+        success: true,
+        webViewLink: promotedFile.getUrl(),
+        fileId: promotedFile.getId()
+      });
+    }
+
     var fileName = payload.fileName;
     var tokenNumber = payload.tokenNumber;
     var isCatalogItem = payload.isCatalogItem === true;
@@ -195,42 +252,76 @@ function doPost(e) {
 
 
 /**
- * Time-driven nightly cleanup (intended for 23:59). Trashes every file in the daily
- * pending folder older than 12 hours, then empties the trash to force-reset Drive
- * allocation so storage never fills up.
+ * Time-driven storage cleanup (intended to run every hour).
+ *
+ * Trashes:
+ *   - Daily Pending files older than 2 HOURS (matches the token/order 2h expiry), and
+ *   - Master Catalog files older than 3 DAYS (promoted reuse copies),
+ * then empties the trash to force-reset Drive allocation so storage never fills up.
  *
  * Drive.Files.emptyTrash() requires the ADVANCED Drive Service (see header comment).
  */
-function nightlyStorageCleanup() {
-  var folder = DriveApp.getFolderById(DAILY_PENDING_FOLDER_ID);
-  var files = folder.getFiles();
-  var cutoffMs = new Date().getTime() - (12 * 60 * 60 * 1000); // 12 hours ago
-  var trashedCount = 0;
+function storageCleanup() {
+  var now = new Date().getTime();
+  var trashedPending = trashOlderThan(DAILY_PENDING_FOLDER_ID, now - PENDING_TTL_MS);
 
-  while (files.hasNext()) {
-    var file = files.next();
-    if (file.getDateCreated().getTime() < cutoffMs) {
-      file.setTrashed(true);
-      trashedCount++;
-    }
+  var trashedCatalog = 0;
+  if (MASTER_CATALOG_FOLDER_ID !== 'PASTE_MASTER_CATALOG_FOLDER_ID') {
+    trashedCatalog = trashOlderThan(MASTER_CATALOG_FOLDER_ID, now - CATALOG_TTL_MS);
   }
 
   // Force-reset Drive allocation by permanently emptying the trash.
   // Requires the Advanced Drive Service (Services -> Drive API).
   Drive.Files.emptyTrash();
 
-  Logger.log('nightlyStorageCleanup: trashed ' + trashedCount +
-    ' file(s) older than 12h from folder ' + DAILY_PENDING_FOLDER_ID +
-    ' and emptied trash.');
+  Logger.log('storageCleanup: trashed ' + trashedPending +
+    ' Daily Pending file(s) older than 2h and ' + trashedCatalog +
+    ' Master Catalog file(s) older than 3 days, then emptied trash.');
 }
 
 
 /**
- * Operator runs this ONCE to install the nightly cleanup trigger at 23:59.
- * Idempotent: removes any existing triggers for nightlyStorageCleanup first.
+ * Trashes every file in the given folder whose creation time is before cutoffMs.
+ * Returns the number of files trashed. A bad/placeholder folder ID is logged and
+ * skipped (returns 0) so one misconfigured folder never aborts the whole cleanup.
  */
-function createNightlyTrigger() {
-  var handlerName = 'nightlyStorageCleanup';
+function trashOlderThan(folderId, cutoffMs) {
+  if (!folderId || folderId.indexOf('PASTE_') === 0) {
+    return 0;
+  }
+  var count = 0;
+  try {
+    var folder = DriveApp.getFolderById(folderId);
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var file = files.next();
+      if (file.getDateCreated().getTime() < cutoffMs) {
+        file.setTrashed(true);
+        count++;
+      }
+    }
+  } catch (err) {
+    Logger.log('trashOlderThan: skipped folder ' + folderId + ' — ' + String(err));
+  }
+  return count;
+}
+
+
+/**
+ * Thin backwards-compatible wrapper: any previously-installed nightly trigger that
+ * still points at nightlyStorageCleanup keeps working by delegating to storageCleanup().
+ */
+function nightlyStorageCleanup() {
+  storageCleanup();
+}
+
+
+/**
+ * Operator runs this ONCE to install the hourly storage-cleanup trigger.
+ * Idempotent: removes any existing triggers for storageCleanup first.
+ */
+function createCleanupTrigger() {
+  var handlerName = 'storageCleanup';
 
   // Delete duplicate existing triggers of the same handler to stay idempotent.
   var triggers = ScriptApp.getProjectTriggers();
@@ -242,12 +333,10 @@ function createNightlyTrigger() {
 
   ScriptApp.newTrigger(handlerName)
     .timeBased()
-    .everyDays(1)
-    .atHour(23)
-    .nearMinute(59)
+    .everyHours(1)
     .create();
 
-  Logger.log('createNightlyTrigger: installed daily trigger for ' + handlerName + ' at ~23:59.');
+  Logger.log('createCleanupTrigger: installed hourly trigger for ' + handlerName + '.');
 }
 
 

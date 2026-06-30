@@ -3,8 +3,8 @@
 <head>
 <!-- Campus Xerox — Shopkeeper Switchboard (VIEW B) -->
 <!-- Shared design system only: /assets/app.css. No Tailwind, no CDNs. -->
-<!-- Talks SAME-ORIGIN to /api/orders (Cloudflare Pages Functions + D1) and -->
-<!-- opens per-file /print.html windows (auth-gated direct print). -->
+<!-- Talks SAME-ORIGIN to /api/orders + /api/pricing (Cloudflare Pages Functions + D1) -->
+<!-- and opens per-file /print.html windows (auth-gated direct print). -->
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Campus Xerox — Shopkeeper Switchboard</title>
@@ -13,6 +13,57 @@
   /* Collapse the two-column dashboard to a single column on narrow screens. */
   @media (max-width: 760px) {
     #layoutGrid { grid-template-columns: 1fr !important; }
+  }
+
+  /* ---------- Per-document detail row (brand-new widget) ---------- */
+  .doc-row { border: 1px solid var(--line); border-radius: 12px; background: #fff; padding: 14px 16px; }
+  .doc-row + .doc-row { margin-top: 10px; }
+  .doc-row .doc-top { display: flex; align-items: center; gap: 14px; }
+  .doc-row .doc-ic {
+    width: 40px; height: 40px; flex: none; border-radius: 9px; background: var(--sky);
+    color: var(--blue-700); display: grid; place-items: center; font-size: 18px; font-weight: 800;
+  }
+  .doc-row .doc-main { min-width: 0; flex: 1; }
+  .doc-row .doc-name { font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .doc-row .doc-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .doc-row .doc-line { flex: none; text-align: right; }
+  .doc-row .doc-line .lt { font-family: var(--mono); font-weight: 800; font-size: 17px; color: var(--ink); }
+  .doc-row .doc-line .lc { font-size: 11px; color: var(--muted); }
+  .doc-row .doc-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .doc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .doc-chip {
+    display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 800;
+    letter-spacing: .04em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px;
+    background: var(--bg); color: var(--ink-2); border: 1px solid var(--line);
+  }
+  .doc-chip.is-color { background: var(--sky); color: var(--blue-700); border-color: #c5d9fb; }
+
+  /* ---------- Pricing tier editor (brand-new widget) ---------- */
+  .tier-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+  table.tier-table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 560px; }
+  table.tier-table thead th {
+    background: var(--navy); color: #fff; text-align: left; font-size: 11px; font-weight: 800;
+    letter-spacing: .08em; text-transform: uppercase; padding: 10px 12px; white-space: nowrap;
+  }
+  table.tier-table thead th.right { text-align: right; }
+  table.tier-table tbody td { padding: 8px 12px; border-top: 1px solid var(--line); vertical-align: middle; }
+  table.tier-table tbody tr:hover { background: var(--sky); }
+  table.tier-table .tier-input {
+    width: 100%; min-width: 78px; border: 1px solid var(--line-2); border-radius: 8px;
+    padding: 9px 10px; font-size: 14px; font-family: var(--mono); font-weight: 700; color: var(--ink);
+    background: #fff; text-align: right; transition: border-color .15s, box-shadow .15s;
+  }
+  table.tier-table .tier-input:focus { outline: none; border-color: var(--blue-600); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+  table.tier-table .tier-input:disabled { background: var(--bg); color: var(--muted); }
+  table.tier-table .row-rm {
+    background: var(--red-50); border: 1px solid #f3c9c9; color: var(--red); cursor: pointer;
+    font-weight: 800; font-size: 13px; border-radius: 8px; padding: 8px 12px; line-height: 1;
+  }
+  table.tier-table .row-rm:hover:not(:disabled) { background: #fbdada; }
+  table.tier-table .row-rm:disabled { opacity: .4; cursor: not-allowed; }
+  .tier-cur { width: 64px; }
+  @media (max-width: 560px) {
+    .pricing-actions .btn { flex: 1 1 auto; }
   }
 </style>
 </head>
@@ -28,6 +79,7 @@
       </div>
     </div>
     <div class="actions">
+      <button id="pricingBtn" type="button" class="btn btn-onnavy">&#128178; Pricing</button>
       <button id="allOrdersBtn" type="button" class="btn btn-onnavy">&#128203; All Orders</button>
       <button id="logoutBtn" type="button" class="btn btn-onnavy">Log out</button>
     </div>
@@ -113,6 +165,62 @@
         </div>
       </div>
 
+      <!-- ============ PRICING DASHBOARD ============ -->
+      <div id="pricingState" class="card hidden">
+        <div class="card-head">
+          <div>
+            <p class="title">&#128178; Pricing &mdash; Volume Tiers</p>
+            <p class="desc">Per-page rates fall as the combined page count of an order rises.</p>
+          </div>
+          <div class="row gap">
+            <button id="pricingResetBtn" type="button" class="btn btn-ghost btn-sm">&#8635; Reset</button>
+            <button id="pricingCloseBtn" type="button" class="btn btn-ghost btn-sm">&#10005; Close</button>
+          </div>
+        </div>
+        <div class="card-body stack">
+
+          <div id="pricingNote" class="alert hidden"></div>
+
+          <div class="row gap wrap" style="align-items:flex-end;">
+            <div class="field" style="margin-bottom:0;">
+              <label class="label" for="pricingCurrency">Currency symbol</label>
+              <input id="pricingCurrency" type="text" maxlength="4" class="input tier-cur mono"
+                     style="font-weight:800;text-align:center;" />
+            </div>
+            <p class="hint" style="margin:0 0 4px;flex:1;min-width:200px;">
+              A document&rsquo;s rate key is <span class="mono">color/bw</span> &times; <span class="mono">single/double</span>.
+              The order&rsquo;s tier is chosen by total units (pages &times; copies across all files).
+            </p>
+          </div>
+
+          <div class="tier-table-wrap">
+            <table class="tier-table">
+              <thead>
+                <tr>
+                  <th class="right">Min Pages</th>
+                  <th class="right">B&amp;W Single</th>
+                  <th class="right">B&amp;W Double</th>
+                  <th class="right">Color Single</th>
+                  <th class="right">Color Double</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="tierBody"><!-- tier rows injected --></tbody>
+            </table>
+          </div>
+
+          <div class="row gap wrap pricing-actions">
+            <button id="tierAddBtn" type="button" class="btn btn-ghost btn-sm">&#43; Add tier</button>
+            <div style="flex:1;"></div>
+            <button id="pricingSaveBtn" type="button" class="btn btn-primary">Save pricing</button>
+          </div>
+
+          <p class="hint" style="margin:0;">
+            The first tier must start at <strong>Min&nbsp;Pages&nbsp;=&nbsp;1</strong> (the base rate). Rates are per page and may be decimals.
+          </p>
+        </div>
+      </div>
+
       <!-- ============ ORDER / CLEARANCE CARD ============ -->
       <div id="orderCard" class="card hidden">
 
@@ -134,18 +242,21 @@
 
         <div class="card-body stack">
 
-          <!-- documents -->
+          <!-- documents (each with its own specs + lineTotal) -->
           <div>
-            <div class="section-title">Documents</div>
-            <div id="cardFileList" class="stack" style="margin-top:6px;"><!-- file rows injected --></div>
+            <div class="row between">
+              <div class="section-title" style="margin:0;">Documents</div>
+              <div id="docSummary" class="section-title" style="margin:0;color:var(--blue-700);"></div>
+            </div>
+            <div id="cardFileList" class="stack" style="margin-top:6px;"><!-- doc rows injected --></div>
           </div>
 
-          <!-- spec tiles -->
+          <!-- order spec summary tiles -->
           <div class="grid-4">
-            <div class="tile"><div class="k">Color</div><div class="v" id="specColor">&mdash;</div></div>
-            <div class="tile"><div class="k">Layout</div><div class="v" id="specLayout">&mdash;</div></div>
-            <div class="tile"><div class="k">Pages</div><div class="v" id="specPages">&mdash;</div></div>
-            <div class="tile"><div class="k">Copies</div><div class="v" id="specCopies">&mdash;</div></div>
+            <div class="tile"><div class="k">Files</div><div class="v" id="specFiles">&mdash;</div></div>
+            <div class="tile"><div class="k">Total Units</div><div class="v" id="specPages">&mdash;</div></div>
+            <div class="tile"><div class="k">Tier (Min&nbsp;Pages)</div><div class="v" id="specTier">&mdash;</div></div>
+            <div class="tile"><div class="k">Total Size</div><div class="v" id="specSize">&mdash;</div></div>
           </div>
 
           <!-- total banner + price editor -->
@@ -193,11 +304,16 @@
   var currentOrder = null;    // last successfully fetched order
   var busy = false;           // request in flight
 
+  // Pricing dashboard state
+  var pricingCurrent = null;  // last loaded { currency, tiers } (server snapshot)
+  var pricingLoaded = false;  // have we fetched at least once?
+
   // ===== Elements =====
   var tokenDisplay = document.getElementById("tokenDisplay");
   var numpad       = document.getElementById("numpad");
   var lookupBtn    = document.getElementById("lookupBtn");
   var allOrdersBtn = document.getElementById("allOrdersBtn");
+  var pricingBtn   = document.getElementById("pricingBtn");
   var logoutBtn    = document.getElementById("logoutBtn");
 
   var idleState    = document.getElementById("idleState");
@@ -205,16 +321,18 @@
   var errorState   = document.getElementById("errorState");
   var orderCard    = document.getElementById("orderCard");
   var listState    = document.getElementById("listState");
+  var pricingState = document.getElementById("pricingState");
   var errorMsg     = document.getElementById("errorMsg");
 
   var cardToken    = document.getElementById("cardToken");
   var cardStudent  = document.getElementById("cardStudent");
   var cardTime     = document.getElementById("cardTime");
   var cardFileList = document.getElementById("cardFileList");
-  var specColor    = document.getElementById("specColor");
-  var specLayout   = document.getElementById("specLayout");
+  var docSummary   = document.getElementById("docSummary");
+  var specFiles    = document.getElementById("specFiles");
   var specPages    = document.getElementById("specPages");
-  var specCopies   = document.getElementById("specCopies");
+  var specTier     = document.getElementById("specTier");
+  var specSize     = document.getElementById("specSize");
   var cardTotal    = document.getElementById("cardTotal");
   var unlockBtn    = document.getElementById("unlockBtn");
   var printAllBtn  = document.getElementById("printAllBtn");
@@ -233,6 +351,15 @@
   var listRefreshBtn = document.getElementById("listRefreshBtn");
   var listCloseBtn   = document.getElementById("listCloseBtn");
 
+  // Pricing dashboard elements
+  var pricingNote     = document.getElementById("pricingNote");
+  var pricingCurrency = document.getElementById("pricingCurrency");
+  var tierBody        = document.getElementById("tierBody");
+  var tierAddBtn      = document.getElementById("tierAddBtn");
+  var pricingSaveBtn  = document.getElementById("pricingSaveBtn");
+  var pricingResetBtn = document.getElementById("pricingResetBtn");
+  var pricingCloseBtn = document.getElementById("pricingCloseBtn");
+
   // ===== Helpers =====
   function formatBytes(bytes) {
     var n = Number(bytes);
@@ -244,9 +371,17 @@
     return rounded + " " + units[i];
   }
 
-  function money(v) {
+  // Round to at most 2 decimals; prefer whole rupees when integral.
+  function fmtAmount(v) {
     var n = Number(v);
-    return RUPEE + " " + (isFinite(n) ? n : 0);
+    if (!isFinite(n)) n = 0;
+    var r = Math.round(n * 100) / 100;
+    if (Math.abs(r - Math.round(r)) < 1e-9) return String(Math.round(r));
+    return String(r);
+  }
+
+  function money(v) {
+    return RUPEE + " " + fmtAmount(v);
   }
 
   function escapeHtml(s) {
@@ -292,11 +427,13 @@
     errorState.classList.add("hidden");
     orderCard.classList.add("hidden");
     listState.classList.add("hidden");
+    pricingState.classList.add("hidden");
     if (which === "idle")    idleState.classList.remove("hidden");
     if (which === "loading") loadingState.classList.remove("hidden");
     if (which === "error")   errorState.classList.remove("hidden");
     if (which === "order")   orderCard.classList.remove("hidden");
     if (which === "list")    listState.classList.remove("hidden");
+    if (which === "pricing") pricingState.classList.remove("hidden");
   }
 
   function updateTokenDisplay() {
@@ -398,12 +535,22 @@
     });
   }
 
-  // Build the list of printable documents for an order.
+  // Build the list of printable documents for an order. Each carries its own specs.
   function documentsOf(order) {
     var specs = parseSpecs(order);
     var files = Array.isArray(specs.files) ? specs.files.slice() : [];
     if (files.length === 0 && order.drive_viewer_url && order.drive_viewer_url !== "PENDING") {
-      files.push({ name: specs.fileName || "Document", url: order.drive_viewer_url, sizeBytes: specs.totalSizeBytes });
+      // Legacy fallback: synthesize a single doc descriptor from order-level fields.
+      files.push({
+        name: specs.fileName || "Document",
+        url: order.drive_viewer_url,
+        sizeBytes: specs.totalSizeBytes,
+        pages: specs.pages,
+        copies: specs.copies,
+        color: specs.color,
+        layout: specs.layout,
+        lineTotal: order.calculated_price
+      });
     }
     return files;
   }
@@ -435,7 +582,8 @@
     cardStudent.textContent = order.student_id || "(none)";
     cardTime.textContent = order.created_at ? ("placed " + order.created_at) : "";
 
-    // Document rows — each with its own Print + Open in Drive.
+    // Per-document rows — each shows its OWN color / layout / pages / copies + lineTotal,
+    // plus the Print + Open-in-Drive actions.
     cardFileList.innerHTML = "";
     if (files.length === 0) {
       var empty = document.createElement("div");
@@ -444,50 +592,30 @@
       cardFileList.appendChild(empty);
     } else {
       files.forEach(function (f, idx) {
-        var name = f.name || ("File " + (idx + 1));
-        var row = document.createElement("div");
-        row.className = "file-row";
-        row.innerHTML =
-          '<div class="file-ic">' + (idx + 1) + '</div>' +
-          '<div class="file-main">' +
-            '<div class="file-name">' + escapeHtml(name) + '</div>' +
-            '<div class="file-meta">' + escapeHtml(formatBytes(f.sizeBytes)) + '</div>' +
-          '</div>' +
-          '<div class="file-actions"></div>';
-        var actions = row.querySelector(".file-actions");
-
-        var printBtn = document.createElement("button");
-        printBtn.type = "button";
-        printBtn.className = "btn btn-success btn-sm";
-        printBtn.textContent = "Print";
-        printBtn.addEventListener("click", function () { openPrintWindow(f); });
-        actions.appendChild(printBtn);
-
-        if (f.url) {
-          var openLink = document.createElement("a");
-          openLink.className = "btn btn-ghost btn-sm";
-          openLink.href = f.url;
-          openLink.target = "_blank";
-          openLink.rel = "noopener";
-          openLink.textContent = "Open in Drive";
-          actions.appendChild(openLink);
-        }
-
-        cardFileList.appendChild(row);
+        cardFileList.appendChild(buildDocRow(f, idx));
       });
     }
 
-    // Spec tiles
-    specColor.textContent  = specs.color  || "—";
-    specLayout.textContent = specs.layout || "—";
-    specPages.textContent  = (specs.pages != null && specs.pages !== "") ? specs.pages : "—";
-    specCopies.textContent = (specs.copies != null && specs.copies !== "") ? specs.copies : "—";
+    // Order-level summary tiles.
+    var fileCount = (specs.fileCount != null) ? specs.fileCount : files.length;
+    var totalPages = (specs.totalPages != null) ? specs.totalPages : sumUnits(files);
+    var tierMin = (specs.tierMinPages != null) ? specs.tierMinPages : "—";
+    var totalSize = (specs.totalSizeBytes != null) ? specs.totalSizeBytes
+                   : files.reduce(function (s, f) { return s + (Number(f.sizeBytes) || 0); }, 0);
+
+    specFiles.textContent = fileCount;
+    specPages.textContent = (totalPages != null && totalPages !== "") ? totalPages : "—";
+    specTier.textContent  = (tierMin != null && tierMin !== "") ? tierMin : "—";
+    specSize.textContent  = totalSize ? formatBytes(totalSize) : "—";
+
+    docSummary.textContent = files.length
+      ? (files.length + (files.length === 1 ? " document" : " documents"))
+      : "";
 
     // Total
     cardTotal.textContent = money(order.calculated_price);
     hidePriceEditor();
 
-    // Has at least one printable file?
     var hasFiles = files.length > 0;
     printAllBtn.disabled = !hasFiles;
 
@@ -517,6 +645,78 @@
     show("order");
   }
 
+  function sumUnits(files) {
+    return files.reduce(function (s, f) {
+      var p = Number(f.pages); var c = Number(f.copies);
+      if (!isFinite(p)) p = 0; if (!isFinite(c)) c = 0;
+      return s + p * c;
+    }, 0);
+  }
+
+  // Build one per-document row (specs + lineTotal + actions).
+  function buildDocRow(f, idx) {
+    var name = f.name || ("File " + (idx + 1));
+    var color = f.color || "—";
+    var layout = f.layout || "—";
+    var pages = (f.pages != null && f.pages !== "") ? f.pages : "—";
+    var copies = (f.copies != null && f.copies !== "") ? f.copies : "—";
+    var isColor = String(color).toLowerCase().indexOf("color") === 0;
+
+    var row = document.createElement("div");
+    row.className = "doc-row";
+
+    var lineCell = "";
+    if (f.lineTotal != null && f.lineTotal !== "") {
+      var rateTxt = (f.unitRate != null && f.unitRate !== "")
+        ? ('<div class="lc">' + RUPEE + " " + escapeHtml(fmtAmount(f.unitRate)) + "/page</div>")
+        : "";
+      lineCell =
+        '<div class="doc-line">' +
+          '<div class="lt">' + escapeHtml(money(f.lineTotal)) + '</div>' +
+          rateTxt +
+        '</div>';
+    }
+
+    row.innerHTML =
+      '<div class="doc-top">' +
+        '<div class="doc-ic">' + (idx + 1) + '</div>' +
+        '<div class="doc-main">' +
+          '<div class="doc-name">' + escapeHtml(name) + '</div>' +
+          '<div class="doc-sub">' + escapeHtml(formatBytes(f.sizeBytes)) + '</div>' +
+        '</div>' +
+        lineCell +
+      '</div>' +
+      '<div class="doc-chips">' +
+        '<span class="doc-chip' + (isColor ? ' is-color' : '') + '">' + escapeHtml(color) + '</span>' +
+        '<span class="doc-chip">' + escapeHtml(layout) + '</span>' +
+        '<span class="doc-chip">' + escapeHtml(pages) + ' pg</span>' +
+        '<span class="doc-chip">× ' + escapeHtml(copies) + ' cop' + (Number(copies) === 1 ? 'y' : 'ies') + '</span>' +
+      '</div>' +
+      '<div class="doc-actions"></div>';
+
+    var actions = row.querySelector(".doc-actions");
+
+    var printBtn = document.createElement("button");
+    printBtn.type = "button";
+    printBtn.className = "btn btn-success btn-sm";
+    printBtn.textContent = "Print";
+    printBtn.disabled = !f.url;
+    printBtn.addEventListener("click", function () { openPrintWindow(f); });
+    actions.appendChild(printBtn);
+
+    if (f.url) {
+      var openLink = document.createElement("a");
+      openLink.className = "btn btn-ghost btn-sm";
+      openLink.href = f.url;
+      openLink.target = "_blank";
+      openLink.rel = "noopener";
+      openLink.textContent = "Open in Drive";
+      actions.appendChild(openLink);
+    }
+
+    return row;
+  }
+
   function markClearedUI() {
     if (currentOrder) currentOrder.is_printed = 1;
     statusRibbon.className = "ribbon ribbon-amber";
@@ -531,8 +731,8 @@
   // Open every document's print page in a new window.
   function openAllForPrint(order) {
     var files = documentsOf(order);
-    files.forEach(function (f) { openPrintWindow(f); });
-    return files.length;
+    files.forEach(function (f) { if (f.url) openPrintWindow(f); });
+    return files.filter(function (f) { return !!f.url; }).length;
   }
 
   // ===== Action: Unlock & Print (or Re-open if cleared) =====
@@ -662,6 +862,25 @@
     return m ? (m[1] + " " + m[2]) : ts;
   }
 
+  // Build the compact specs string for the list row from per-file data when available.
+  function listSpecsText(specs) {
+    var files = Array.isArray(specs.files) ? specs.files : [];
+    if (files.length === 1) {
+      var f = files[0];
+      var p = (f.pages != null ? f.pages : "—");
+      var c = (f.copies != null ? f.copies : "—");
+      return (f.color || "—") + " · " + (f.layout || "—") + " · " + p + "p × " + c;
+    }
+    if (files.length > 1) {
+      var units = (specs.totalPages != null) ? specs.totalPages : sumUnits(files);
+      return files.length + " docs · " + units + " units";
+    }
+    // Legacy / order-level fields.
+    var pages = (specs.pages != null ? specs.pages : "—");
+    var copies = (specs.copies != null ? specs.copies : "—");
+    return (specs.color || "—") + " · " + (specs.layout || "—") + " · " + pages + "p × " + copies;
+  }
+
   function loadList() {
     busy = true;
     show("list");
@@ -684,10 +903,11 @@
         var specs = parseSpecs(o);
         var status = statusOf(o);
         if (status === "ready") ready++; else if (status === "cleared") cleared++; else pending++;
-        var fileName = specs.fileName || "—";
-        var pages = (specs.pages != null ? specs.pages : "—");
-        var copies = (specs.copies != null ? specs.copies : "—");
-        var specsTxt = (specs.color || "—") + " · " + (specs.layout || "—") + " · " + pages + "p × " + copies;
+        var files = Array.isArray(specs.files) ? specs.files : [];
+        var fileName = (files.length === 1 && files[0] && files[0].name)
+          ? files[0].name
+          : (specs.fileName || (files.length > 1 ? (files.length + " files") : "—"));
+        var specsTxt = listSpecsText(specs);
 
         var tr = document.createElement("tr");
         tr.innerHTML =
@@ -719,6 +939,200 @@
     });
   }
 
+  // ===== Pricing dashboard =====
+  var RATE_KEYS = ["bw_single", "bw_double", "color_single", "color_double"];
+
+  function showPricingNote(kind, msg) {
+    pricingNote.className = "alert " + (kind === "ok" ? "alert-ok" : kind === "info" ? "alert-info" : "alert-error");
+    pricingNote.textContent = msg;
+    pricingNote.classList.remove("hidden");
+  }
+  function hidePricingNote() {
+    pricingNote.classList.add("hidden");
+    pricingNote.textContent = "";
+  }
+
+  // Build a single editable tier row. `removable` controls whether the first
+  // (base) tier can be deleted and whether its minPages is locked at 1.
+  function buildTierRow(tier, isFirst) {
+    var t = tier || {};
+    var rates = t.rates || {};
+    var tr = document.createElement("tr");
+
+    function cell(value, attr, isMin) {
+      var td = document.createElement("td");
+      var inp = document.createElement("input");
+      inp.type = "number";
+      inp.className = "tier-input";
+      inp.setAttribute("data-field", attr);
+      if (isMin) {
+        inp.min = "1"; inp.step = "1";
+        inp.value = (value != null && value !== "") ? value : (isFirst ? 1 : "");
+        if (isFirst) { inp.value = 1; inp.disabled = true; inp.title = "The base tier always starts at 1."; }
+      } else {
+        inp.min = "0"; inp.step = "0.01";
+        inp.value = (value != null && value !== "") ? value : 0;
+      }
+      td.appendChild(inp);
+      return td;
+    }
+
+    tr.appendChild(cell(t.minPages, "minPages", true));
+    tr.appendChild(cell(rates.bw_single, "bw_single", false));
+    tr.appendChild(cell(rates.bw_double, "bw_double", false));
+    tr.appendChild(cell(rates.color_single, "color_single", false));
+    tr.appendChild(cell(rates.color_double, "color_double", false));
+
+    var rmTd = document.createElement("td");
+    rmTd.style.textAlign = "center";
+    var rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "row-rm";
+    rm.textContent = "Remove";
+    rm.title = "Remove this tier";
+    rm.disabled = isFirst; // never remove the base tier
+    rm.addEventListener("click", function () {
+      tr.parentNode.removeChild(tr);
+      refreshTierLockState();
+    });
+    rmTd.appendChild(rm);
+    tr.appendChild(rmTd);
+
+    return tr;
+  }
+
+  // After add/remove, the FIRST row must always be the locked base tier (minPages=1, non-removable).
+  function refreshTierLockState() {
+    var rows = tierBody.querySelectorAll("tr");
+    rows.forEach(function (tr, idx) {
+      var isFirst = (idx === 0);
+      var minInp = tr.querySelector('input[data-field="minPages"]');
+      var rm = tr.querySelector(".row-rm");
+      if (minInp) {
+        if (isFirst) { minInp.value = 1; minInp.disabled = true; minInp.title = "The base tier always starts at 1."; }
+        else { minInp.disabled = false; minInp.title = ""; }
+      }
+      if (rm) rm.disabled = isFirst;
+    });
+  }
+
+  function renderTierEditor(pricing) {
+    var p = pricing || {};
+    pricingCurrency.value = (typeof p.currency === "string" && p.currency.length) ? p.currency : RUPEE;
+    tierBody.innerHTML = "";
+    var tiers = Array.isArray(p.tiers) && p.tiers.length ? p.tiers : [{ minPages: 1, rates: {} }];
+    tiers.forEach(function (t, idx) {
+      tierBody.appendChild(buildTierRow(t, idx === 0));
+    });
+    refreshTierLockState();
+  }
+
+  function collectPricing() {
+    var currency = pricingCurrency.value.trim() || RUPEE;
+    if (currency.length > 4) currency = currency.slice(0, 4);
+    var tiers = [];
+    var rows = tierBody.querySelectorAll("tr");
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i];
+      var minInp = tr.querySelector('input[data-field="minPages"]');
+      var minPages = (i === 0) ? 1 : Math.floor(Number(minInp.value));
+      if (!isFinite(minPages) || minPages < 1) {
+        return { error: "Row " + (i + 1) + ": Min Pages must be a whole number ≥ 1." };
+      }
+      var rates = {};
+      for (var k = 0; k < RATE_KEYS.length; k++) {
+        var key = RATE_KEYS[k];
+        var inp = tr.querySelector('input[data-field="' + key + '"]');
+        var v = Number(inp.value);
+        if (!isFinite(v) || v < 0) {
+          return { error: "Row " + (i + 1) + ": " + key.replace("_", " ") + " rate must be ≥ 0." };
+        }
+        rates[key] = v;
+      }
+      tiers.push({ minPages: minPages, rates: rates });
+    }
+    if (tiers.length === 0) return { error: "At least one tier is required." };
+    tiers.sort(function (a, b) { return a.minPages - b.minPages; });
+    if (tiers[0].minPages !== 1) return { error: "The first tier must start at Min Pages = 1." };
+    // Reject duplicate minPages thresholds (would shadow each other).
+    for (var j = 1; j < tiers.length; j++) {
+      if (tiers[j].minPages === tiers[j - 1].minPages) {
+        return { error: "Two tiers share Min Pages = " + tiers[j].minPages + ". Each threshold must be unique." };
+      }
+    }
+    return { value: { currency: currency, tiers: tiers } };
+  }
+
+  function loadPricing(force) {
+    show("pricing");
+    if (pricingLoaded && !force && pricingCurrent) {
+      renderTierEditor(pricingCurrent);
+      hidePricingNote();
+      return;
+    }
+    showPricingNote("info", "Loading current pricing…");
+    tierBody.innerHTML = "";
+    fetch("/api/pricing", { method: "GET", headers: { "Accept": "application/json" } })
+    .then(function (res) { return res.json(); })
+    .then(function (data) {
+      if (data && data.success && data.pricing) {
+        pricingCurrent = data.pricing;
+        pricingLoaded = true;
+        renderTierEditor(pricingCurrent);
+        hidePricingNote();
+      } else {
+        showPricingNote("error", (data && data.error) ? data.error : "Could not load pricing.");
+      }
+    })
+    .catch(function (err) {
+      showPricingNote("error", "Network error: " + (err && err.message ? err.message : "could not reach server"));
+    });
+  }
+
+  function savePricing() {
+    var collected = collectPricing();
+    if (collected.error) {
+      showPricingNote("error", collected.error);
+      return;
+    }
+    pricingSaveBtn.disabled = true;
+    var prevLabel = pricingSaveBtn.textContent;
+    pricingSaveBtn.textContent = "Saving…";
+    hidePricingNote();
+
+    fetch("/api/pricing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ pricing: collected.value })
+    })
+    .then(function (res) {
+      return res.json().then(function (data) { return { status: res.status, data: data }; });
+    })
+    .then(function (r) {
+      pricingSaveBtn.disabled = false;
+      pricingSaveBtn.textContent = prevLabel;
+      if (r.data && r.data.success) {
+        pricingCurrent = r.data.pricing || collected.value;
+        pricingLoaded = true;
+        renderTierEditor(pricingCurrent); // re-render the normalized (sorted) snapshot
+        showPricingNote("ok", "Pricing saved. New orders will use these rates.");
+      } else {
+        showPricingNote("error", (r.data && r.data.error) ? r.data.error : ("Could not save pricing (" + r.status + ")."));
+      }
+    })
+    .catch(function (err) {
+      pricingSaveBtn.disabled = false;
+      pricingSaveBtn.textContent = prevLabel;
+      showPricingNote("error", "Network error: " + (err && err.message ? err.message : "could not save"));
+    });
+  }
+
+  function resetPricing() {
+    // Reload the live snapshot from the server (discards unsaved edits).
+    loadPricing(true);
+    showPricingNote("info", "Reloaded the current saved pricing.");
+  }
+
   // ===== Logout =====
   function logout() {
     fetch("/api/logout", { method: "POST", headers: { "Accept": "application/json" } })
@@ -735,6 +1149,7 @@
   unlockBtn.addEventListener("click", onUnlockClick);
   printAllBtn.addEventListener("click", onPrintAllClick);
   allOrdersBtn.addEventListener("click", loadList);
+  pricingBtn.addEventListener("click", function () { loadPricing(false); });
   logoutBtn.addEventListener("click", logout);
   listRefreshBtn.addEventListener("click", loadList);
   listCloseBtn.addEventListener("click", function () { pressClear(); });
@@ -748,9 +1163,21 @@
     e.stopPropagation();
   });
 
-  // Physical keyboard support (ignored while editing the price field).
+  // Pricing dashboard wiring.
+  tierAddBtn.addEventListener("click", function () {
+    tierBody.appendChild(buildTierRow({ minPages: "", rates: {} }, tierBody.querySelectorAll("tr").length === 0));
+    refreshTierLockState();
+    hidePricingNote();
+  });
+  pricingSaveBtn.addEventListener("click", savePricing);
+  pricingResetBtn.addEventListener("click", resetPricing);
+  pricingCloseBtn.addEventListener("click", function () { pressClear(); });
+
+  // Physical keyboard support (ignored while editing any text/number field,
+  // e.g. the price field or the pricing-tier inputs).
   document.addEventListener("keydown", function (e) {
-    if (document.activeElement === priceInput) return;
+    var ae = document.activeElement;
+    if (ae && (ae.tagName === "INPUT" || ae.tagName === "SELECT" || ae.tagName === "TEXTAREA")) return;
     if (e.key >= "0" && e.key <= "9") {
       pressDigit(e.key);
       e.preventDefault();

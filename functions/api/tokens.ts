@@ -42,6 +42,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       "DELETE FROM xerox_queue WHERE created_at < STRFTIME('%Y-%m-%d %H:%M:%S','NOW','-2 hours','localtime')"
     ).run();
 
+    // (1b) Also purge expired catalog/reuse rows (2h pending / 3-day promoted).
+    await env.DB.prepare(
+      "DELETE FROM catalog WHERE expires_at IS NOT NULL AND expires_at < STRFTIME('%Y-%m-%d %H:%M:%S','NOW','localtime')"
+    ).run();
+
     // (2) Race-safely reserve a free token by attempting to INSERT a PLACEHOLDER row.
     // The PRIMARY KEY on token_id makes each INSERT atomic; a UNIQUE/constraint
     // failure means that number is taken, so we pick another and retry.

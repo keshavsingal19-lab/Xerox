@@ -31,9 +31,9 @@ interface CatalogRow {
   file_hash: string;
   file_name: string;
   hit_count: number;
-  promoted: number;
-  catalog_url: string | null;
-  catalog_file_id: string | null;
+  drive_url: string | null;
+  drive_file_id: string | null;
+  tier: string;
 }
 
 // Forward a payload to Apps Script server-to-server (no browser CORS) and parse its JSON.
@@ -48,19 +48,34 @@ async function callGas(bodyObj: unknown): Promise<any> {
   try {
     return JSON.parse(text);
   } catch {
-    return { success: false, error: "Apps Script returned a non-JSON response (check the /exec URL).", raw: text.slice(0, 500) };
+    return {
+      success: false,
+      error: "Apps Script returned a non-JSON response (check the /exec URL).",
+      raw: text.slice(0, 500),
+    };
   }
 }
 
+// Local-time "now" and the two retention windows, expressed as SQLite STRFTIME.
 const NOW_LOCAL = "STRFTIME('%Y-%m-%d %H:%M:%S','NOW','localtime')";
+const PLUS_2_HOURS = "STRFTIME('%Y-%m-%d %H:%M:%S','NOW','+2 hours','localtime')";
+const PLUS_3_DAYS = "STRFTIME('%Y-%m-%d %H:%M:%S','NOW','+3 days','localtime')";
 
 export const onRequestOptions: PagesFunction<Env> = async () =>
   new Response(null, { status: 204, headers: CORS_HEADERS });
 
 // POST /api/upload
-//   { check: true, fileHash }                                  -> cheap lookup; says if this content is already promoted.
-//   { isCatalogItem: true, fileName, ... }                     -> manual Master-Catalog lookup (forwarded to GAS).
-//   { fileName, tokenNumber, fileBase64, mimeType, fileHash }  -> real upload with dedup/auto-promotion.
+//   (1) RESOLVE  { check: true, fileHash }
+//       Look up a NON-EXPIRED catalog row that already has a Drive link.
+//       Found  -> bump hit_count + last_seen; if hit_count>=3 and tier='pending'
+//                 PROMOTE (GAS copies into the Master Catalog, 3-day retention)
+//                 and serve the catalog copy. Returns { reuse:true, webViewLink, promoted }.
+//       Missing-> { reuse:false } (no counter change).
+//   (2) UPLOAD   { fileName, tokenNumber, fileBase64, mimeType, fileHash }
+//       Store the bytes in Daily Pending via GAS, then UPSERT the catalog row
+//       (hit_count 1 on insert / +1 on conflict), refresh the link, last_seen=now,
+//       expires_at = now + 2 hours, tier stays 'pending'. Returns { webViewLink, reuse:false }.
+//   (3) MANUAL   { isCatalogItem: true, ... }  -> forwarded to GAS unchanged.
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
     let payload: any;
@@ -71,114 +86,110 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const db = context.env.DB;
-    const fileHash = typeof payload.fileHash === "string" && payload.fileHash.length > 0 ? payload.fileHash : null;
+    const fileHash =
+      typeof payload.fileHash === "string" && payload.fileHash.length > 0 ? payload.fileHash : null;
 
-    // ---- Mode 1: cheap promotion check (no file bytes uploaded) ----
+    // ---- Mode 1: RESOLVE (cheap reuse lookup, no file bytes) ----
     if (payload.check === true) {
-      if (!fileHash) return json({ success: true, promoted: false, hit_count: 0 });
+      if (!fileHash) return json({ success: true, reuse: false });
+
+      // Only a non-expired row that already carries a Drive link is reusable.
       const row = await db
-        .prepare("SELECT promoted, catalog_url, hit_count FROM catalog WHERE file_hash = ?")
+        .prepare(
+          `SELECT file_hash, file_name, hit_count, drive_url, drive_file_id, tier
+             FROM catalog
+            WHERE file_hash = ?
+              AND drive_url IS NOT NULL
+              AND expires_at IS NOT NULL
+              AND expires_at > ${NOW_LOCAL}`
+        )
         .bind(fileHash)
         .first<CatalogRow>();
-      if (row && row.promoted === 1 && row.catalog_url) {
-        return json({ success: true, promoted: true, webViewLink: row.catalog_url, hit_count: row.hit_count });
+
+      if (!row) {
+        // No valid reusable copy — do NOT touch the counter.
+        return json({ success: true, reuse: false });
       }
-      return json({ success: true, promoted: false, hit_count: row ? row.hit_count : 0 });
+
+      // A valid reusable hit: count it and refresh recency.
+      await db
+        .prepare(
+          `UPDATE catalog SET hit_count = hit_count + 1, last_seen = ${NOW_LOCAL} WHERE file_hash = ?`
+        )
+        .bind(fileHash)
+        .run();
+
+      const newHitCount = row.hit_count + 1;
+
+      // The 3rd hit while still 'pending' promotes this content into the Master
+      // Catalog (3-day retention). GAS copies the existing pending file.
+      if (newHitCount >= PROMOTE_THRESHOLD && row.tier === "pending" && row.drive_file_id) {
+        const promo = await callGas({ action: "promote", fileId: row.drive_file_id });
+        if (promo && promo.success === true && promo.webViewLink) {
+          await db
+            .prepare(
+              `UPDATE catalog
+                  SET tier = 'promoted',
+                      drive_url = ?,
+                      drive_file_id = ?,
+                      expires_at = ${PLUS_3_DAYS},
+                      last_seen = ${NOW_LOCAL}
+                WHERE file_hash = ?`
+            )
+            .bind(promo.webViewLink, promo.fileId || row.drive_file_id, fileHash)
+            .run();
+
+          return json({ success: true, reuse: true, webViewLink: promo.webViewLink, promoted: true });
+        }
+        // Promotion failed: still serve the existing valid pending copy instantly.
+        return json({ success: true, reuse: true, webViewLink: row.drive_url, promoted: false });
+      }
+
+      // Valid reusable copy, no promotion this time.
+      return json({ success: true, reuse: true, webViewLink: row.drive_url, promoted: false });
     }
 
-    // ---- Mode 2: manual Master-Catalog lookup (existing feature, untouched) ----
+    // ---- Mode 3: manual Master-Catalog lookup (forwarded to GAS unchanged) ----
     if (payload.isCatalogItem === true) {
       const data = await callGas(payload);
       return json(data, data && data.success ? 200 : 502);
     }
 
-    // ---- Mode 3: real upload ----
-
-    // No usable hash -> dedup disabled; plain upload to Daily Pending (legacy behavior).
-    if (!fileHash) {
-      const data = await callGas({
-        fileName: payload.fileName,
-        tokenNumber: payload.tokenNumber,
-        fileBase64: payload.fileBase64,
-        isCatalogItem: false,
-        mimeType: payload.mimeType,
-        target: "pending",
-      });
-      if (!data || data.success !== true || !data.webViewLink) {
-        return json({ success: false, error: data && data.error ? data.error : "Drive upload failed." }, 502);
-      }
-      return json({ success: true, webViewLink: data.webViewLink, fileId: data.fileId, fileName: data.fileName, promoted: false, fromCatalog: false });
-    }
-
-    // Atomically bump the counter (single statement), then read the row.
-    // Two statements instead of RETURNING for maximum D1 compatibility.
-    await db
-      .prepare(
-        `INSERT INTO catalog (file_hash, file_name, hit_count, updated_at)
-         VALUES (?, ?, 1, ${NOW_LOCAL})
-         ON CONFLICT(file_hash) DO UPDATE SET
-           hit_count = hit_count + 1,
-           file_name = excluded.file_name,
-           updated_at = excluded.updated_at`
-      )
-      .bind(fileHash, payload.fileName || "")
-      .run();
-
-    const state = await db
-      .prepare("SELECT hit_count, promoted, catalog_url, catalog_file_id FROM catalog WHERE file_hash = ?")
-      .bind(fileHash)
-      .first<CatalogRow>();
-
-    // Already promoted -> serve the permanent copy instantly, no upload at all.
-    if (state && state.promoted === 1 && state.catalog_url) {
-      return json({
-        success: true,
-        webViewLink: state.catalog_url,
-        fileId: state.catalog_file_id,
-        fileName: payload.fileName,
-        promoted: true,
-        fromCatalog: true,
-        cached: true,
-      });
-    }
-
-    const hitCount = state ? state.hit_count : 1;
-
-    // Claim promotion atomically so only ONE concurrent uploader creates the
-    // permanent copy: "WHERE promoted = 0" makes the winner unique.
-    let promoteThis = false;
-    if (hitCount >= PROMOTE_THRESHOLD) {
-      const claim = await db
-        .prepare(`UPDATE catalog SET promoted = 1, updated_at = ${NOW_LOCAL} WHERE file_hash = ? AND promoted = 0`)
-        .bind(fileHash)
-        .run();
-      promoteThis = (claim.meta?.changes ?? 0) === 1;
-    }
-
-    // Upload to the chosen Drive folder.
+    // ---- Mode 2: real UPLOAD (store bytes in Daily Pending, then UPSERT catalog) ----
     const data = await callGas({
       fileName: payload.fileName,
       tokenNumber: payload.tokenNumber,
       fileBase64: payload.fileBase64,
       isCatalogItem: false,
       mimeType: payload.mimeType,
-      target: promoteThis ? "catalog" : "pending",
+      target: "pending",
       fileHash: fileHash,
     });
 
     if (!data || data.success !== true || !data.webViewLink) {
-      // Release a promotion claim we could not fulfil, so a later upload can retry.
-      if (promoteThis) {
-        await db.prepare(`UPDATE catalog SET promoted = 0 WHERE file_hash = ?`).bind(fileHash).run();
-      }
-      return json({ success: false, error: data && data.error ? data.error : "Drive upload failed." }, 502);
+      return json(
+        { success: false, error: data && data.error ? data.error : "Drive upload failed." },
+        502
+      );
     }
 
-    // Persist the permanent link if this upload won the promotion.
-    if (promoteThis) {
+    // Record / refresh the reusable master for the next 2 hours.
+    if (fileHash) {
       await db
-        .prepare(`UPDATE catalog SET catalog_url = ?, catalog_file_id = ?, updated_at = ${NOW_LOCAL} WHERE file_hash = ?`)
-        .bind(data.webViewLink, data.fileId || null, fileHash)
+        .prepare(
+          `INSERT INTO catalog
+             (file_hash, file_name, hit_count, drive_url, drive_file_id, tier, first_seen, last_seen, expires_at)
+           VALUES (?, ?, 1, ?, ?, 'pending', ${NOW_LOCAL}, ${NOW_LOCAL}, ${PLUS_2_HOURS})
+           ON CONFLICT(file_hash) DO UPDATE SET
+             hit_count = hit_count + 1,
+             file_name = excluded.file_name,
+             drive_url = excluded.drive_url,
+             drive_file_id = excluded.drive_file_id,
+             tier = 'pending',
+             last_seen = excluded.last_seen,
+             expires_at = excluded.expires_at`
+        )
+        .bind(fileHash, payload.fileName || "", data.webViewLink, data.fileId || null)
         .run();
     }
 
@@ -187,8 +198,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       webViewLink: data.webViewLink,
       fileId: data.fileId,
       fileName: data.fileName,
-      promoted: promoteThis,
-      fromCatalog: promoteThis,
+      reuse: false,
     });
   } catch (err) {
     return json({ success: false, error: String(err) }, 502);

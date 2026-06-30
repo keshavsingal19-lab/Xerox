@@ -138,6 +138,14 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     return context.next();
   }
 
+  // (c2) Saving the pricing model is shopkeeper-only; reading it (GET) is public.
+  if (pathname === "/api/pricing") {
+    if (method === "POST" && !authed) {
+      return jsonUnauthorized();
+    }
+    return context.next();
+  }
+
   // (d) Everything else (login/logout, tokens, upload, POST /api/orders,
   // GET /api/orders?token_id, static assets, "/") passes through untouched.
   return context.next();
