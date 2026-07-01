@@ -308,12 +308,12 @@
   /* ============================================================================
      Campus Xerox — Student page.
      Same-origin APIs only (Cloudflare Pages Functions + D1):
-       POST /api/tokens                  reserve a token (also purges expired rows)
-       POST /api/upload {check:true,...} RESOLVE  (instant reuse if a valid catalog row exists)
-       POST /api/upload {fileName,...}   UPLOAD   (real bytes via XHR, with SHA-256 hash)
-       POST /api/orders                  finalize order (print_specifications JSON)
-       GET  /api/pricing                 volume-tier pricing model
-       POST /api/login                   staff login
+       POST /api/tokens                     reserve a token (also purges expired rows)
+       POST /api/upload  (x-op: resolve)    RESOLVE  — JSON {fileHash}; instant reuse if a valid catalog row exists
+       POST /api/upload  (raw bytes)        UPLOAD   — body = raw File bytes; metadata in x-file-* headers (streamed via XHR)
+       POST /api/orders                     finalize order (print_specifications JSON)
+       GET  /api/pricing                    volume-tier pricing model
+       POST /api/login                      staff login
      pdf.js is lazy-injected ONLY when a PDF is added (never blocks first paint).
      ============================================================================ */
 
@@ -326,6 +326,56 @@
 
   /* ============================ Concurrency ============================ */
   const UPLOAD_POOL = 3; // parallel uploads (#6)
+
+  /* ============================ Upload resilience ============================
+     While an order is in flight we (a) hold a Screen Wake Lock so phones don't
+     sleep mid-upload, re-acquiring it whenever the tab becomes visible again,
+     and (b) install a beforeunload guard that warns the student before they
+     navigate away. Both are torn down on completion or error. Everything is
+     wrapped in try/catch so unsupported browsers degrade silently.
+     ========================================================================== */
+  let uploadInFlight = false;   // true only between submit and done/error
+  let wakeLock = null;          // WakeLockSentinel while held
+
+  async function acquireWakeLock() {
+    try {
+      if (uploadInFlight && navigator.wakeLock && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+      }
+    } catch (e) { /* unsupported / denied — degrade silently */ }
+  }
+  async function releaseWakeLock() {
+    try {
+      if (wakeLock) { await wakeLock.release(); }
+    } catch (e) { /* no-op */ }
+    wakeLock = null;
+  }
+
+  function beforeUnloadGuard(e) {
+    if (!uploadInFlight) return undefined;
+    e.preventDefault();
+    e.returnValue = ""; // required for the browser to show its warning
+    return "";
+  }
+
+  function beginResilience() {
+    uploadInFlight = true;
+    try { window.addEventListener("beforeunload", beforeUnloadGuard); } catch (e) { /* no-op */ }
+    acquireWakeLock();
+  }
+  function endResilience() {
+    uploadInFlight = false;
+    try { window.removeEventListener("beforeunload", beforeUnloadGuard); } catch (e) { /* no-op */ }
+    releaseWakeLock();
+  }
+
+  // Re-acquire the screen lock when the tab returns to the foreground mid-upload.
+  document.addEventListener("visibilitychange", () => {
+    try {
+      if (document.visibilityState === "visible" && uploadInFlight && !wakeLock) acquireWakeLock();
+    } catch (e) { /* no-op */ }
+  });
 
   /* ============================ Pricing model (volume tiers) ============================ */
   // Mirrors functions/api/pricing.ts EXACTLY.
@@ -1006,19 +1056,13 @@
   tttResetBtn.addEventListener("click", tttReset);
   tttBuild();
 
-  /* ============================ Upload primitives ============================ */
-  function readBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result || "";
-        const comma = result.indexOf(",");
-        resolve(comma >= 0 ? result.slice(comma + 1) : result);
-      };
-      reader.onerror = () => reject(new Error("Could not read " + file.name));
-      reader.readAsDataURL(file);
-    });
-  }
+  /* ============================ Upload primitives ============================
+     Transport moves RAW bytes only — no base64, no FileReader, no multipart.
+       - RESOLVE : POST /api/upload with header x-op:resolve + JSON {fileHash}.
+       - UPLOAD  : POST /api/upload with the File sent DIRECTLY as the body
+                   (Content-Type application/octet-stream) so upload.onprogress
+                   reports real transferred bytes; metadata rides in x-file-* headers.
+     ========================================================================== */
 
   // SHA-256 hex of file content (browser-computed). null if crypto.subtle unavailable.
   async function sha256Hex(file) {
@@ -1038,14 +1082,11 @@
     try {
       const res = await fetch("/api/upload", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ check: true, fileHash: fileHash })
+        headers: { "Content-Type": "application/json", "x-op": "resolve" },
+        body: JSON.stringify({ fileHash: fileHash })
       });
       const data = await res.json();
-      // New backend signals instant reuse via {reuse:true}; older backends used
-      // {promoted:true}. Accept either as long as a usable link is present.
-      const canReuse = data && data.success && data.webViewLink && (data.reuse === true || data.promoted === true);
-      if (canReuse) {
+      if (data && data.success && data.reuse === true && data.webViewLink) {
         return { reuse: true, webViewLink: data.webViewLink, promoted: !!data.promoted };
       }
       return { reuse: false };
@@ -1054,12 +1095,22 @@
     }
   }
 
-  // UPLOAD via XHR so we get real upload byte-progress events.
-  function uploadBytes(payload, onProgress) {
+  // UPLOAD via XHR so upload.onprogress gives real transferred bytes. The File/Blob
+  // is sent DIRECTLY as the request body; all metadata travels in headers.
+  //   x-file-name = encodeURIComponent(originalName)   x-file-hash = sha256 hex (may be empty)
+  //   x-token     = reserved token number              x-mime      = file mime type
+  //   x-file-size = byteLength
+  // Resolves with the parsed JSON only when { success:true, webViewLink } (Drive-confirmed).
+  function uploadBytes(file, meta, onProgress) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", "/api/upload");
-      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      xhr.setRequestHeader("x-file-name", encodeURIComponent(meta.fileName || ""));
+      xhr.setRequestHeader("x-file-hash", meta.fileHash || "");
+      xhr.setRequestHeader("x-token", String(meta.tokenNumber == null ? "" : meta.tokenNumber));
+      xhr.setRequestHeader("x-mime", meta.mimeType || "application/octet-stream");
+      xhr.setRequestHeader("x-file-size", String(meta.fileSize == null ? file.size : meta.fileSize));
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
       };
@@ -1074,7 +1125,7 @@
       };
       xhr.onerror = () => reject(new Error("Network error during upload."));
       xhr.ontimeout = () => reject(new Error("Upload timed out."));
-      xhr.send(JSON.stringify(payload));
+      xhr.send(file); // send the File/Blob DIRECTLY — no base64, no FileReader
     });
   }
 
@@ -1139,6 +1190,9 @@
     hideAlert(stepError);
     successBadge.classList.add("hidden");
     formCard.classList.add("is-locked");
+
+    // Keep the screen awake and warn before navigating away until this order lands.
+    beginResilience();
     resultCard.classList.remove("hidden");
     tokenBig.textContent = "#---";
     buildSteps();
@@ -1222,28 +1276,25 @@
         trackLabel.textContent = "Uploading " + toUpload.length + " file" + (toUpload.length > 1 ? "s" : "") +
           (reusedCount > 0 ? " · " + reusedCount + " instant ⚡" : "");
 
-        // 2d. Upload bytes concurrently with a bounded pool (#6).
+        // 2d. Upload RAW bytes concurrently with a bounded pool (#6). The File is
+        //     streamed directly (no base64); metadata rides in x-file-* headers.
         let failure = null;
         await runPool(toUpload, UPLOAD_POOL, async (j) => {
           if (failure) return;
-          let base64;
-          try { base64 = await readBase64(j.doc.file); }
-          catch (e) { failure = e; return; }
-          const payload = {
+          const meta = {
             fileName: j.doc.file.name,
             tokenNumber: tokenId,
-            fileBase64: base64,
-            isCatalogItem: false,
-            mimeType: j.doc.file.type || "",
-            fileHash: j.hash || ""
+            mimeType: j.doc.file.type || "application/octet-stream",
+            fileHash: j.hash || "",
+            fileSize: j.doc.file.size
           };
           try {
-            const data = await uploadBytes(payload, (loaded, total) => {
+            const data = await uploadBytes(j.doc.file, meta, (loaded, total) => {
               j.loaded = loaded;
               j.total = total || j.total;
               pushAggregateProgress();
             });
-            // Bytes fully sent; server is now finishing with Drive — count as done.
+            // Drive-confirmed (success + real webViewLink); count the bytes as done.
             j.loaded = j.total;
             pushAggregateProgress();
             j.info = { webViewLink: data.webViewLink, fromCatalog: !!data.fromCatalog, promoted: !!data.promoted };
@@ -1260,6 +1311,17 @@
       recalcAggLoaded(jobs);
       aggLoadedBytes = bytesToSend; // clamp to total for a clean finish
       updateMetricsDisplay();
+
+      // HONEST CONFIRMATION: no file counts as done without a real, Drive-confirmed
+      // webViewLink (either instant-reuse or a successful upload). If any is missing,
+      // fail here and do NOT finalize the order.
+      const missing = jobs.filter((j) => !(j.info && j.info.webViewLink));
+      if (missing.length > 0) {
+        throw new Error(
+          missing.length + " file" + (missing.length > 1 ? "s" : "") +
+          " did not confirm on the print warehouse. Please try again."
+        );
+      }
 
       setStep("upload", "done");
       trackLabel.textContent = "All files ready";
@@ -1351,6 +1413,8 @@
       successBadge.classList.remove("hidden");
       submitBtn.textContent = "Generate Print Token";
       successBadge.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Order is truly complete — drop the wake lock and the navigation guard.
+      endResilience();
     } catch (e) {
       setStep("finalize", "error");
       failStep("Could not place your order. " + e.message + " (Your token is #" + tokenId + " — show this if the file already uploaded.)");
@@ -1365,6 +1429,8 @@
     submitBtn.disabled = false;
     submitBtn.textContent = "Generate Print Token";
     formCard.classList.remove("is-locked");
+    // Upload is no longer in flight — release the wake lock and navigation guard.
+    endResilience();
   }
 
   /* ============================ New order reset ============================ */
@@ -1382,6 +1448,7 @@
     submitBtn.textContent = "Generate Print Token";
     formCard.classList.remove("is-locked");
     stopBar(); stopMetrics(); tttReset();
+    endResilience();
     window.scrollTo({ top: 0, behavior: "smooth" });
   });
 

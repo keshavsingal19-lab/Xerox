@@ -2,6 +2,15 @@ name = "campus-xerox"
 compatibility_date = "2026-06-29"
 pages_build_output_dir = "."
 
+# The 3 Google OAuth values are SECRETS — set them in the Cloudflare dashboard
+# (Settings -> Variables and Secrets), NOT here:
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
+#
+# Drive folders are NOT configured here: with the drive.file scope the app can
+# only use folders IT created, so functions/api/upload.ts auto-creates and reuses
+# its own "CampusXerox_DailyPending" / "CampusXerox_MasterCatalog" folders by name.
+# (Leave DRIVE_PENDING_FOLDER_ID / DRIVE_CATALOG_FOLDER_ID unset.)
+
 [[d1_databases]]
 binding = "DB"
 database_name = "xerox_db"
